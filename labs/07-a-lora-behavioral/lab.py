@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-# # Lab 07: LoRA in 50 Lines
+# # Lab 07-A: LoRA for Behavioral Fine-Tuning
 #
 # **Act VI — Making It Yours** | GPU recommended | ~60–90 minutes
 #
@@ -24,10 +24,10 @@
 # 1. **Implement LoRA from scratch** — the A x B low-rank decomposition,
 #    the alpha/r scaling, and the zero-init trick that starts training
 #    from the pretrained model's exact behavior
-# 2. **Attach adapters** to Qwen3-0.6B and fine-tune on two real tasks:
-#    cooking instructions and kitchen tool-calling
-# 3. **Measure** perplexity before and after — quantify the effect of
-#    training 24,576 parameters for 3 minutes
+# 2. **Attach adapters** to Qwen3-0.6B and fine-tune on 20 cooking
+#    instruction examples
+# 3. **Compare** the model's responses before and after — see how
+#    24,576 parameters can shift the response style
 # 4. **Merge** the adapter back into base weights and verify the merged
 #    model produces identical output
 # 5. **Save** a 2 MB adapter file instead of a 1.2 GB model copy
@@ -35,6 +35,10 @@
 # ---
 #
 # ### The idea
+#
+# This is the **behavioral** LoRA lab — teaching the model a domain's
+# response *style*. The next lab (07-B) will cover teaching structured
+# output formats (tool calling).
 #
 # Full fine-tuning updates all 596M parameters of Qwen3-0.6B. LoRA
 # updates only 24,576 — a rank-8 adapter on the query projection.
@@ -270,18 +274,15 @@ console.print(f"  Compression: {n_base / trainable:.0f}x fewer trainable params"
 # Each example is formatted using Qwen3's chat template.
 
 # %%
-# Training data lives in data.py — 20 instruction + 20 tool-calling examples
-# in the cooking domain. See the file for the full dataset.
+# Training data lives in data.py — 20 cooking instruction examples.
 import importlib
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 data_mod = importlib.import_module("data")
 INSTRUCTIONS = data_mod.INSTRUCTIONS
-TOOL_CALLS = data_mod.TOOL_CALLS
-KITCHEN_TOOLS = data_mod.KITCHEN_TOOLS
 
-console.print(f"  Dataset: {len(INSTRUCTIONS)} instructions + {len(TOOL_CALLS)} tool calls")
+console.print(f"  Dataset: {len(INSTRUCTIONS)} instruction examples")
 
 # %% [markdown]
 # ---
@@ -307,32 +308,12 @@ def format_instruction(user_msg, assistant_msg):
     )
 
 
-def format_tool_call(user_msg, tool_call_json):
-    """Format a tool-calling example."""
-    messages = [
-        {"role": "user", "content": user_msg},
-        {"role": "assistant", "content": f"<tool_call>\n{tool_call_json}\n</tool_call>"},
-    ]
-    return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-        tools=KITCHEN_TOOLS,
-        enable_thinking=False,
-    )
-
-
 # Tokenize all examples
 MAX_LEN = 256
 all_input_ids = []
 
 for user, assistant in INSTRUCTIONS:
     text = format_instruction(user, assistant)
-    ids = tokenizer.encode(text, truncation=True, max_length=MAX_LEN)
-    all_input_ids.append(torch.tensor(ids))
-
-for user, tool_json in TOOL_CALLS:
-    text = format_tool_call(user, tool_json)
     ids = tokenizer.encode(text, truncation=True, max_length=MAX_LEN)
     all_input_ids.append(torch.tensor(ids))
 

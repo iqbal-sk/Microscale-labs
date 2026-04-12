@@ -53,11 +53,12 @@ just run 01
 | 04 | [Model Autopsy](labs/04-model-autopsy/) | III | yes | — | — | yes | 45-60m |
 | 05 | [The $1 Pretraining Run](labs/05-dollar-pretraining/) | IV | slow | yes | yes | T4 | 90-120m |
 | 06 | [The Hallucination Probe](labs/06-hallucination-probe/) | V | yes | — | — | yes | 60-90m |
-| 07 | [LoRA in 50 Lines](labs/07-lora-from-scratch/) | VI | slow | yes | yes | T4 | 60-90m |
-| 08 | Your First DPO Alignment | VI | slow | yes | yes | T4 | 90m |
-| 09 | Quantize It Yourself | VII | yes | — | — | yes | 90m |
-| 10 | The Roofline Lab | VIII | no | yes | Metal | yes | 60-90m |
-| 11 | KV Cache Calculator | VIII | partial | yes | yes | yes | 60m |
+| 07-A | [LoRA for Behavioral Fine-Tuning](labs/07-a-lora-behavioral/) | VI | slow | yes | yes | T4 | 60-90m |
+| 07-B | [LoRA for Tool Calling](labs/07-b-lora-tool-calling/) | VI | slow | yes | yes | T4 | 60-90m |
+| 08 | [Your First DPO Alignment](labs/08-dpo-alignment/) | VI | slow | yes | yes | T4 | 90m |
+| 09 | [Quantize It Yourself](labs/09-quantize-it-yourself/) | VII | yes | — | — | yes | 90m |
+| 10 | [The Roofline Lab](labs/10-roofline-lab/) | VIII | no | yes | Metal | yes | 60-90m |
+| 11 | [KV Cache Calculator](labs/11-kv-cache-calculator/) | VIII | partial | yes | yes | yes | 60m |
 | 12 | The Inference Showdown | IX | yes | yes | yes | partial | 45-60m |
 
 ## Hardware Requirements
