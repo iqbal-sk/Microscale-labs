@@ -35,7 +35,9 @@ Hands-on labs for Microscale Academy (microscale.academy). A shared `microscale/
 ## Commands
 
 ```bash
-just setup          # Install all dependencies
+just setup-auto     # Auto-detect platform and install
+just setup          # Install for Mac / CPU
+just setup-cuda     # Install for Linux + NVIDIA GPU
 just run 01         # Run lab 01 as a script
 just lab            # Open JupyterLab
 just test           # Run all tests

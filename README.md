@@ -15,19 +15,14 @@ Click the Colab badge on any lab below.
 ```bash
 git clone https://github.com/user/Microscale.git
 cd Microscale
-uv sync --extra dev --extra notebooks
-uv run jupyter lab
-```
 
-**Option B2: Linux with NVIDIA GPU**
+# Auto-detect your platform (Mac/GPU/CPU) and install:
+just setup-auto
 
-```bash
-git clone https://github.com/user/Microscale.git
-cd Microscale
-just setup-cuda
-# or manually:
-# uv sync --extra dev --extra notebooks
-# uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+# Or pick manually:
+just setup        # Mac / CPU-only
+just setup-cuda   # Linux + NVIDIA GPU (CUDA 12.4)
+just setup-cuda126  # Linux + NVIDIA GPU (CUDA 12.6, newer drivers)
 ```
 
 **Option C: Local with pip**
@@ -36,7 +31,7 @@ just setup-cuda
 git clone https://github.com/user/Microscale.git
 cd Microscale
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,notebooks]"
+pip install -e ".[cpu,dev,notebooks]"  # or .[cu124,dev,notebooks] for GPU
 jupyter lab
 ```
 

@@ -7,22 +7,42 @@ default:
 
 # ─── Setup ───────────────────────────────────────
 
-# Install all dependencies (dev + notebooks)
+# Install for Mac or CPU-only (default)
 setup:
-    uv sync --extra dev --extra notebooks
+    uv sync --extra cpu --extra dev --extra notebooks
+
+# Install for Linux with NVIDIA GPU (CUDA 12.4)
+setup-cuda:
+    uv sync --extra cu124 --extra dev --extra notebooks
+
+# Install for Linux with NVIDIA GPU (CUDA 12.6 — newer drivers)
+setup-cuda126:
+    uv sync --extra cu126 --extra dev --extra notebooks
 
 # Install with MLX support (Mac only)
 setup-apple:
-    uv sync --extra dev --extra notebooks --extra apple
-
-# Install with CUDA GPU support (Linux with NVIDIA GPU)
-setup-cuda:
-    uv sync --extra dev --extra notebooks
-    uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+    uv sync --extra cpu --extra apple --extra dev --extra notebooks
 
 # Install with llama.cpp inference tools
 setup-inference:
-    uv sync --extra dev --extra notebooks --extra inference
+    uv sync --extra cpu --extra dev --extra notebooks --extra inference
+
+# Auto-detect platform and install accordingly
+setup-auto:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+        echo "NVIDIA GPU detected — installing with CUDA 12.4 support"
+        uv sync --extra cu124 --extra dev --extra notebooks
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        echo "macOS detected — installing with MPS support"
+        uv sync --extra cpu --extra dev --extra notebooks
+    else
+        echo "No GPU detected — installing CPU-only"
+        uv sync --extra cpu --extra dev --extra notebooks
+    fi
+    echo ""
+    uv run python -c "from microscale import device_summary; print(device_summary())"
 
 # ─── Labs ────────────────────────────────────────
 

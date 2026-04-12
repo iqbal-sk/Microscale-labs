@@ -9,7 +9,6 @@ description = "Microscale ML educational labs"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
-    "torch>=2.2",
     "transformers>=4.40",
     "safetensors>=0.4",
     "huggingface-hub>=0.24",
@@ -25,7 +24,16 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+# ─── PyTorch platform extras ─────────────────────────────
+# torch is NOT in core deps — pick ONE of these based on your platform:
+#
+#   Mac / CPU-only:   uv sync --extra cpu     (or just: just setup)
+#   Linux + NVIDIA:   uv sync --extra cu124   (or just: just setup-cuda)
+#
 [project.optional-dependencies]
+cpu = ["torch>=2.2"]
+cu124 = ["torch>=2.2"]
+cu126 = ["torch>=2.2"]
 apple = ["mlx>=0.20", "mlx-lm>=0.20"]
 inference = ["llama-cpp-python>=0.3"]
 notebooks = ["jupyterlab>=4.2", "jupytext>=1.16", "ipywidgets>=8.1"]
@@ -38,16 +46,35 @@ dev = [
     "jupytext>=1.16",
 ]
 
-# --- CUDA GPU support ---
-# By default, uv installs CPU-only PyTorch from PyPI (works on Mac/CPU).
-# On Linux with NVIDIA GPU, install with:
-#
-#   uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-#
-# Or use the justfile shortcut:
-#
-#   just setup-cuda
+# ─── uv: PyTorch index routing ───────────────────────────
+# cpu/cu124/cu126 are mutually exclusive — uv resolves torch
+# from the correct index based on which extra you choose.
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu124" },
+        { extra = "cu126" },
+    ],
+]
 
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", extra = "cu124" },
+    { index = "pytorch-cu126", extra = "cu126" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+# ─── Tool config ─────────────────────────────────────────
 [tool.ruff]
 target-version = "py311"
 line-length = 100
