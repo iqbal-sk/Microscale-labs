@@ -465,7 +465,145 @@ console.print(table)
 
 # %% [markdown]
 # ---
-# ## 8. Bandwidth Efficiency
+# ## 8. Predicted vs Actual — Run Real Inference
+#
+# The theoretical table says Qwen3-0.6B should run at a certain tok/s.
+# Let's load the real model, generate text, and see how close actual
+# throughput comes to the roofline prediction.
+
+# %%
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+console.print("\n[bold]Loading Qwen3-0.6B for real-world measurement...[/bold]")
+rl_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
+rl_model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen3-0.6B",
+    dtype=torch.float16,
+).to(device)
+rl_model.eval()
+
+# %%
+# Measure actual tokens/sec at batch=1 FP16
+prompt = "The future of artificial intelligence is"
+input_ids = rl_tokenizer(prompt, return_tensors="pt").input_ids.to(device)
+N_GENERATE = 100
+
+# Warmup
+with torch.no_grad():
+    _ = rl_model.generate(
+        input_ids,
+        max_new_tokens=10,
+        do_sample=False,
+        pad_token_id=rl_tokenizer.eos_token_id,
+    )
+
+# Sync
+if device.type == "cuda":
+    torch.cuda.synchronize()
+elif device.type == "mps":
+    torch.mps.synchronize()
+
+t0 = time.perf_counter()
+with torch.no_grad():
+    output = rl_model.generate(
+        input_ids,
+        max_new_tokens=N_GENERATE,
+        do_sample=False,
+        pad_token_id=rl_tokenizer.eos_token_id,
+    )
+if device.type == "cuda":
+    torch.cuda.synchronize()
+elif device.type == "mps":
+    torch.mps.synchronize()
+elapsed = time.perf_counter() - t0
+
+n_generated = output.shape[1] - input_ids.shape[1]
+actual_tok_s = n_generated / elapsed
+
+# Prediction from roofline (batch=1, FP16, AI=1.0)
+predicted_tok_s = (bw_gb_s * 1e9 * 1.0) / (2 * model_params)
+efficiency = actual_tok_s / predicted_tok_s * 100
+
+# %%
+table = Table(title="Roofline Prediction vs Actual (Qwen3-0.6B, batch=1, FP16)")
+table.add_column("Metric", style="bold")
+table.add_column("Value", justify="right")
+table.add_row("Predicted (roofline max)", f"{predicted_tok_s:.0f} tok/s")
+table.add_row("Actual (HuggingFace transformers)", f"{actual_tok_s:.1f} tok/s")
+table.add_row("Efficiency", f"[bold]{efficiency:.0f}%[/bold]")
+table.add_row("Generation time", f"{elapsed:.2f}s for {n_generated} tokens")
+console.print(table)
+
+# %% [markdown]
+# **What the gap means:**
+#
+# The roofline is the theoretical ceiling — assuming the framework reads
+# weights once per token and does nothing else. In practice:
+#
+# - **HuggingFace transformers** overhead: Python, attention bookkeeping,
+#   tokenizer calls, KV cache management
+# - **Kernel launch latency** on small models (each kernel dispatch takes
+#   ~10-50μs on a GPU)
+# - **Memory fragmentation**: the effective bandwidth is less than peak
+# - **Attention computation** isn't included in the 2P FLOPs estimate
+#
+# Optimized runtimes like **llama.cpp** and **MLX-LM** achieve 60-80% of
+# roofline. Naive HuggingFace generation is often only 20-40%. That is
+# a huge performance win available from switching runtimes — which is
+# exactly what Lab 12 measures.
+
+# %%
+fig, ax = plt.subplots(figsize=(12, 6))
+bars = ax.bar(
+    ["Roofline\nMaximum", "HuggingFace\nTransformers"],
+    [predicted_tok_s, actual_tok_s],
+    color=["#4a7c74", "#b87333"],
+    width=0.5,
+    edgecolor="#1a1f3a",
+    linewidth=1.5,
+)
+for bar, val in zip(bars, [predicted_tok_s, actual_tok_s]):
+    ax.text(
+        bar.get_x() + bar.get_width() / 2,
+        bar.get_height() + 5,
+        f"{val:.0f} tok/s",
+        ha="center",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+# Add efficiency bar
+ax.text(
+    0.5,
+    0.95,
+    f"HuggingFace achieves {efficiency:.0f}% of theoretical maximum",
+    transform=ax.transAxes,
+    ha="center",
+    fontsize=12,
+    fontweight="bold",
+    color="#1a1f3a",
+    bbox=dict(boxstyle="round,pad=0.5", facecolor="#f4ecd8", edgecolor="#b87333", linewidth=1.5),
+)
+
+ax.set_ylabel("Tokens per Second")
+ax.set_title(
+    "Theoretical Maximum vs Actual Throughput",
+    fontsize=13,
+    fontweight="bold",
+)
+ax.set_ylim(0, max(predicted_tok_s, actual_tok_s) * 1.3)
+ax.grid(True, alpha=0.2, axis="y")
+fig.tight_layout()
+show(fig, filename="10-predicted-vs-actual.png")
+
+# Clean up
+del rl_model
+if device.type == "mps":
+    torch.mps.empty_cache()
+
+# %% [markdown]
+# ---
+# ## 9. Bandwidth Efficiency
 #
 # How close are you to your GPU's theoretical maximum?
 
