@@ -19,6 +19,17 @@ uv sync --extra dev --extra notebooks
 uv run jupyter lab
 ```
 
+**Option B2: Linux with NVIDIA GPU**
+
+```bash
+git clone https://github.com/user/Microscale.git
+cd Microscale
+just setup-cuda
+# or manually:
+# uv sync --extra dev --extra notebooks
+# uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+```
+
 **Option C: Local with pip**
 
 ```bash

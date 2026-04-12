@@ -26,18 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-apple = [
-    "mlx>=0.20",
-    "mlx-lm>=0.20",
-]
-inference = [
-    "llama-cpp-python>=0.3",
-]
-notebooks = [
-    "jupyterlab>=4.2",
-    "jupytext>=1.16",
-    "ipywidgets>=8.1",
-]
+apple = ["mlx>=0.20", "mlx-lm>=0.20"]
+inference = ["llama-cpp-python>=0.3"]
+notebooks = ["jupyterlab>=4.2", "jupytext>=1.16", "ipywidgets>=8.1"]
 dev = [
     "pytest>=8.0",
     "nbmake>=1.5",
@@ -46,6 +37,16 @@ dev = [
     "nbstripout>=0.7",
     "jupytext>=1.16",
 ]
+
+# --- CUDA GPU support ---
+# By default, uv installs CPU-only PyTorch from PyPI (works on Mac/CPU).
+# On Linux with NVIDIA GPU, install with:
+#
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# Or use the justfile shortcut:
+#
+#   just setup-cuda
 
 [tool.ruff]
 target-version = "py311"

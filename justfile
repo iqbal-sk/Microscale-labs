@@ -15,6 +15,11 @@ setup:
 setup-apple:
     uv sync --extra dev --extra notebooks --extra apple
 
+# Install with CUDA GPU support (Linux with NVIDIA GPU)
+setup-cuda:
+    uv sync --extra dev --extra notebooks
+    uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+
 # Install with llama.cpp inference tools
 setup-inference:
     uv sync --extra dev --extra notebooks --extra inference
