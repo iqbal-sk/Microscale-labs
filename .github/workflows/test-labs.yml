@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        lab: ['01']  # Extend as labs are added
+        lab: ['01', '04', '05']  # Labs that run without large model downloads
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
