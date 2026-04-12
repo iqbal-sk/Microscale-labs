@@ -1,0 +1,10 @@
+# jupytext.toml — Bidirectional pairing between .py and .ipynb
+
+# Percent format: # %% cell markers in .py files
+# These are valid Python that runs with `python lab.py`
+# AND opens as notebooks in VS Code, JupyterLab, PyCharm
+formats = "py:percent,ipynb"
+
+# Notebooks are paired: editing either .py or .ipynb + running
+# `jupytext --sync` updates the other.
+# In CI, we generate .ipynb from .py only.
