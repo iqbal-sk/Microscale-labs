@@ -242,8 +242,8 @@ console.print(f"  Columns: {train_dataset.column_names}")
 #   starting behavior. Lower = more aggressive preference learning.
 # - **LoRA rank = 16**: Higher than Lab 07's rank-8 because DPO needs
 #   more capacity to learn subtle preference shifts.
-# - **Learning rate = 5e-6**: Much lower than SFT — DPO is a fine
-#   adjustment, not a major behavior change.
+# - **Learning rate = 5e-7**: Much lower than SFT (10x less) — DPO is
+#   a fine adjustment, not a major behavior change.
 
 # %%
 from peft import LoraConfig
@@ -264,9 +264,11 @@ dpo_config = DPOConfig(
     beta=0.1,
     max_length=512,
     max_prompt_length=256,
-    learning_rate=5e-6,
+    learning_rate=5e-7,  # DPO uses much lower LR than SFT
     per_device_train_batch_size=2,
     gradient_accumulation_steps=2,
+    warmup_ratio=0.1,
+    lr_scheduler_type="cosine",
     max_steps=N_STEPS,
     logging_steps=max(1, N_STEPS // 10),
     save_steps=N_STEPS,  # save only at end
