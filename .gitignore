@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.python-version
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HuggingFace cache (don't commit models)
+models/
+*.safetensors
+*.bin
+*.gguf
+
+# Lab outputs (generated artifacts)
+outputs/
+
+# Playwright MCP (browser automation artifacts)
+.playwright-mcp/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
