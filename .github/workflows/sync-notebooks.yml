@@ -1,0 +1,30 @@
+name: Sync Notebooks
+
+on:
+  push:
+    branches: [main]
+    paths: ['labs/**']
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --extra dev --extra notebooks
+      - name: Generate .ipynb from .py sources
+        run: |
+          mkdir -p notebooks
+          for f in labs/*/lab.py; do
+            dir=$(basename $(dirname "$f"))
+            uv run jupytext --to ipynb --output "notebooks/${dir}.ipynb" "$f"
+          done
+      - name: Commit generated notebooks
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add notebooks/
+          git diff --cached --quiet || git commit -m "chore: sync generated notebooks"
+          git push

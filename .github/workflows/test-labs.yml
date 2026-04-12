@@ -1,0 +1,34 @@
+name: Test Labs
+
+on:
+  push:
+    branches: [main]
+    paths: ['labs/**', 'microscale/**', 'tests/**']
+  pull_request:
+    paths: ['labs/**', 'microscale/**', 'tests/**']
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --extra dev --extra notebooks
+      - run: uv run pytest tests/ -v
+        env:
+          MICROSCALE_CI: "1"
+
+  lab-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        lab: ['01']  # Extend as labs are added
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --extra dev --extra notebooks
+      - name: Run lab ${{ matrix.lab }}
+        run: uv run python labs/${{ matrix.lab }}-*/lab.py
+        env:
+          MICROSCALE_CI: "1"
+          MICROSCALE_OUTPUT_DIR: "/tmp/lab-outputs"
