@@ -20,8 +20,8 @@ cd Microscale
 just setup-auto
 
 # Or pick manually:
-just setup        # Mac / CPU-only
-just setup-cuda   # Linux + NVIDIA GPU (CUDA 12.4)
+just setup          # Mac / CPU-only
+just setup-cuda     # Linux + NVIDIA GPU (CUDA 12.4)
 just setup-cuda126  # Linux + NVIDIA GPU (CUDA 12.6, newer drivers)
 ```
 
@@ -31,16 +31,16 @@ just setup-cuda126  # Linux + NVIDIA GPU (CUDA 12.6, newer drivers)
 git clone https://github.com/user/Microscale.git
 cd Microscale
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[cpu,dev,notebooks]"  # or .[cu124,dev,notebooks] for GPU
+pip install -e ".[cpu,dev,notebooks]"   # Mac / CPU
+# or: pip install -e ".[cu124,dev,notebooks]"  # Linux + NVIDIA GPU
 jupyter lab
 ```
 
 **Option D: Run as scripts (no notebook required)**
 
 ```bash
-uv sync
-uv run python labs/01-token-tax/lab.py
-# or: just run 01
+just run 01
+# or: uv run python labs/01-token-tax/lab.py
 ```
 
 ## Labs
@@ -48,12 +48,12 @@ uv run python labs/01-token-tax/lab.py
 | # | Lab | Act | CPU | GPU | Mac | Colab | Time |
 |---|-----|-----|-----|-----|-----|-------|------|
 | 01 | [The Token Tax](labs/01-token-tax/) | I | yes | — | — | yes | 30m |
-| 02 | Attention Under the Microscope | II | yes | faster | yes | yes | 60-90m |
-| 03 | Build a Transformer Block | II | yes | — | yes | yes | 90-120m |
-| 04 | Model Autopsy | III | yes | — | — | yes | 45-60m |
-| 05 | The $1 Pretraining Run | IV | slow | yes | yes | T4 | 90-120m |
-| 06 | The Hallucination Probe | V | yes | faster | yes | yes | 60-90m |
-| 07 | LoRA in 50 Lines | VI | slow | yes | yes | T4 | 60-90m |
+| 02 | [Attention Under the Microscope](labs/02-attention-microscope/) | II | yes | faster | yes | yes | 60-90m |
+| 03 | [Build a Transformer Block](labs/03-build-a-transformer/) | II | yes | — | yes | yes | 90-120m |
+| 04 | [Model Autopsy](labs/04-model-autopsy/) | III | yes | — | — | yes | 45-60m |
+| 05 | [The $1 Pretraining Run](labs/05-dollar-pretraining/) | IV | slow | yes | yes | T4 | 90-120m |
+| 06 | [The Hallucination Probe](labs/06-hallucination-probe/) | V | yes | — | — | yes | 60-90m |
+| 07 | [LoRA in 50 Lines](labs/07-lora-from-scratch/) | VI | slow | yes | yes | T4 | 60-90m |
 | 08 | Your First DPO Alignment | VI | slow | yes | yes | T4 | 90m |
 | 09 | Quantize It Yourself | VII | yes | — | — | yes | 90m |
 | 10 | The Roofline Lab | VIII | no | yes | Metal | yes | 60-90m |
@@ -62,44 +62,82 @@ uv run python labs/01-token-tax/lab.py
 
 ## Hardware Requirements
 
-These labs target consumer hardware:
-- **Mac:** M-series with 16-32GB unified RAM
+These labs are designed for consumer hardware:
+
+- **Mac:** M-series with 16-32GB unified RAM (MPS acceleration auto-detected)
 - **NVIDIA:** RTX 3060/4060+ with 8-12GB VRAM
 - **Colab Free:** T4 GPU, 15GB VRAM
-- **CPU:** Works for most labs (slower for training-heavy ones)
+- **CPU:** Works for most labs (slower for training-heavy ones like 05, 07, 08)
 
-## Task Runner
+## How Labs Work
 
-If you have [just](https://github.com/casey/just) installed:
+Each lab is a **Jupytext percent-format `.py` file** — simultaneously a valid Python script and a Jupyter notebook source:
 
-```bash
-just              # list commands
-just setup        # install deps
-just run 01       # run lab 01 as a script
-just lab          # open JupyterLab
-just test         # run all tests
-just sync         # generate .ipynb from .py sources
-just prefetch     # download all models for offline use
 ```
+labs/01-token-tax/lab.py        ← you edit this (source of truth)
+        │
+        ├─→ python lab.py        ← run as script (outputs to outputs/)
+        ├─→ VS Code / JupyterLab ← open as notebook (# %% cells supported natively)
+        └─→ just sync            ← generates .ipynb for Colab
+```
+
+Labs import shared utilities from the `microscale` package — device detection, visualization helpers, model loading — so each lab stays focused on educational content. Adding a new lab is one file that imports `from microscale import ...`.
 
 ## Project Structure
 
 ```
-microscale/       # Shared reusable package (device, viz, models, cache)
-labs/             # Lab source files (.py, Jupytext percent format)
-notebooks/        # Generated .ipynb files (for Colab)
-tests/            # Unit tests + lab smoke tests
+microscale/              Shared reusable package
+├── device.py            CPU / CUDA / MPS / MLX auto-detection
+├── viz.py               Dual-output plotting (notebook + CLI)
+├── models.py            Pinned model registry
+├── metrics.py           Perplexity computation
+├── attention.py         Attention extraction and visualization
+├── transformer_block.py From-scratch transformer (matches Qwen3)
+├── tiny_gpt.py          10M-param GPT-2 for pretraining labs
+├── autopsy.py           Safetensors header parsing
+├── lora.py              LoRA from scratch
+├── cache.py             HuggingFace cache management
+└── env.py               Environment detection (notebook/Colab/CI)
+
+labs/                    Lab source files (.py, Jupytext percent format)
+├── 01-token-tax/
+├── 02-attention-microscope/
+├── 03-build-a-transformer/
+├── 04-model-autopsy/
+├── 05-dollar-pretraining/
+├── 06-hallucination-probe/
+├── 07-lora-from-scratch/
+└── ...
+
+notebooks/               CI-generated .ipynb files (for Colab)
+tests/                   42 unit tests across all modules
 ```
 
-## How Labs Work
+## Task Runner
 
-Each lab is a **Jupytext percent-format `.py` file** — a valid Python script that also opens as a notebook:
+Install [just](https://github.com/casey/just) (`brew install just` on Mac, `cargo install just` elsewhere):
 
-- **Run as a script:** `python labs/01-token-tax/lab.py` (outputs save to `outputs/`)
-- **Open as a notebook:** VS Code, JupyterLab, and PyCharm all natively support `# %%` cells
-- **Open in Colab:** CI generates `.ipynb` files with "Open in Colab" badges
+```bash
+just                    # list all commands
+just setup-auto         # auto-detect platform, install deps
+just run 01             # run lab 01 as a script
+just lab                # open JupyterLab
+just test               # run all 42 tests
+just sync               # generate .ipynb from .py sources
+just prefetch           # download all models for offline use
+just lint               # lint all code with ruff
+just fmt                # format all code with ruff
+```
 
-Labs import shared utilities from the `microscale` package — device detection, visualization helpers, model loading — so each lab stays focused on its educational content.
+## API Keys
+
+Lab 06 (Hallucination Probe) uses the OpenRouter API. Create a `.env` file in the project root:
+
+```
+OPENROUTER_API_KEY=sk-or-your-key-here
+```
+
+Get a free key at [openrouter.ai/keys](https://openrouter.ai/keys). The lab costs less than $0.01 to run.
 
 ## License
 

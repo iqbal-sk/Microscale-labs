@@ -77,7 +77,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from rich.console import Console
-from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
 console = Console()
@@ -308,38 +307,56 @@ def train_model(name: str, data: torch.Tensor) -> tuple[TinyGPT, list[float]]:
 
     n_seqs = data.shape[0]
     losses = []
+    lr_history = []
     mdl.train()
     t0 = time.time()
+    log_interval = max(1, N_STEPS // 10)
+    tokens_per_step = BATCH_SIZE * SEQ_LEN
 
-    with Progress(
-        TextColumn(f"[bold]{name}[/bold]"),
-        BarColumn(),
-        TextColumn("{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task("", total=N_STEPS)
-        for step in range(N_STEPS):
-            idx = torch.randint(0, n_seqs, (BATCH_SIZE,))
-            batch = data[idx].to(device)
+    console.print(
+        f"  [dim]Config: {N_STEPS} steps, batch={BATCH_SIZE}, seq_len={SEQ_LEN}, lr={LR}[/dim]"
+    )
+    console.print(f"  [dim]Total tokens: {N_STEPS * tokens_per_step:,}[/dim]\n")
 
-            output = mdl(batch, labels=batch)
-            loss = output["loss"]
+    for step in range(N_STEPS):
+        idx = torch.randint(0, n_seqs, (BATCH_SIZE,))
+        batch = data[idx].to(device)
 
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(mdl.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
+        output = mdl(batch, labels=batch)
+        loss = output["loss"]
 
-            losses.append(loss.item())
-            progress.update(task, advance=1)
+        optimizer.zero_grad()
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(mdl.parameters(), 1.0).item()
+        optimizer.step()
+        scheduler.step()
+
+        current_lr = optimizer.param_groups[0]["lr"]
+        losses.append(loss.item())
+        lr_history.append(current_lr)
+
+        # Log every 10% of training
+        if (step + 1) % log_interval == 0 or step == 0:
+            elapsed_so_far = time.time() - t0
+            tok_per_sec = (step + 1) * tokens_per_step / elapsed_so_far
+            avg_loss = np.mean(losses[-log_interval:])
+            console.print(
+                f"  Step {step + 1:5d}/{N_STEPS}"
+                f"  loss={avg_loss:.4f}"
+                f"  lr={current_lr:.2e}"
+                f"  grad_norm={grad_norm:.2f}"
+                f"  tok/s={tok_per_sec:,.0f}"
+                f"  [{elapsed_so_far:.0f}s]"
+            )
 
     elapsed = time.time() - t0
-    tok_seen = N_STEPS * BATCH_SIZE * SEQ_LEN
+    tok_seen = N_STEPS * tokens_per_step
     avg_final = np.mean(losses[-50:])
     console.print(
-        f"  {name}: {elapsed:.0f}s | {tok_seen:,} tokens | final loss: [bold]{avg_final:.3f}[/bold]"
+        f"\n  [bold]{name} done:[/bold] {elapsed:.0f}s |"
+        f" {tok_seen:,} tokens |"
+        f" {tok_seen / elapsed:,.0f} tok/s |"
+        f" final loss: [bold]{avg_final:.3f}[/bold]"
     )
     return mdl, losses
 
