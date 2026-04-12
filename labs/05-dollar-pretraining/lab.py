@@ -43,8 +43,9 @@
 # learning rate schedule, the generation quality). The only thing that is
 # small is the scale.
 #
-# By the end you will own two trained language models and a measured answer
-# to the question: "Does data quality matter more than data quantity?"
+# **Cost estimate:** This lab trains ~32M tokens on a 10.7M model. On a
+# Colab T4 that is roughly $0.10 of compute. On your laptop it is free.
+# The "$1" in the title is generous — you could run this 10 times over.
 
 # %% [markdown]
 # ---
@@ -86,8 +87,7 @@ console = Console()
 # ## 2. Build the Model
 #
 # Our model is a standard GPT-2 architecture: token embeddings + position
-# embeddings → stack of transformer blocks → language model head. The key
-# config choices that give us ~10.7M parameters:
+# embeddings, a stack of transformer blocks, then a language model head.
 #
 # | Config | Value | Why |
 # |--------|-------|-----|
@@ -102,13 +102,16 @@ console = Console()
 # %%
 from microscale.tiny_gpt import TinyGPT
 
+VOCAB_SIZE = 10000
+SEQ_LEN = 512
+
 model = TinyGPT(
-    vocab_size=10000,
+    vocab_size=VOCAB_SIZE,
     d_model=320,
     n_heads=5,
     n_layers=6,
     d_ff=1280,
-    max_seq_len=512,
+    max_seq_len=SEQ_LEN,
     tie_weights=True,
 ).to(device)
 
@@ -125,11 +128,9 @@ components = {
     "Token embeddings": model.tok_emb.weight.numel(),
     "Position embeddings": model.pos_emb.weight.numel(),
     "Attention (all layers)": sum(
-        p.numel() for block in model.blocks for name, p in block.attn.named_parameters()
+        p.numel() for block in model.blocks for p in block.attn.parameters()
     ),
-    "FFN (all layers)": sum(
-        p.numel() for block in model.blocks for name, p in block.ffn.named_parameters()
-    ),
+    "FFN (all layers)": sum(p.numel() for block in model.blocks for p in block.ffn.parameters()),
     "LayerNorms": sum(
         p.numel() for block in model.blocks for name, p in block.named_parameters() if "ln" in name
     )
@@ -151,58 +152,56 @@ console.print(table)
 # Stories use simple vocabulary that a 3-4 year old would understand, but
 # have correct grammar, coherent plots, and consistent characters.
 #
-# We use a restricted vocabulary of 10,000 tokens built from the GPT-2
-# tokenizer — keeping only the most frequent tokens. This matches the
-# approach from the original TinyStories paper.
+# We use the GPT-2 tokenizer but restrict to the 10,000 most common
+# tokens. Tokens outside this set are skipped during tokenization,
+# keeping only in-vocabulary tokens. This follows the approach from
+# the original TinyStories paper.
 
 # %%
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
-print("Loading TinyStories dataset (streaming)...")
-raw_dataset = load_dataset("roneneldan/TinyStories", split="train", streaming=True)
+print("Loading TinyStories dataset...")
+# Load a concrete slice (not streaming) so cells can be re-run
+N_STORIES = 5000 if is_ci() else 50000
+raw_dataset = load_dataset("roneneldan/TinyStories", split=f"train[:{N_STORIES}]")
 
-# Use GPT-2 tokenizer but we'll only keep tokens in our vocab range
 base_tokenizer = AutoTokenizer.from_pretrained("gpt2")
 if base_tokenizer.pad_token is None:
     base_tokenizer.pad_token = base_tokenizer.eos_token
 
-VOCAB_SIZE = 10000
-SEQ_LEN = 512
+console.print(f"  Loaded {len(raw_dataset):,} stories")
 
 # %% [markdown]
-# We need to convert stories into fixed-length token sequences. Stories that
-# are longer than 512 tokens get truncated; shorter ones get packed together.
+# We need to convert stories into fixed-length token sequences. Tokens
+# outside our 10K vocabulary are dropped (not replaced with a dummy token,
+# which would pollute the training signal).
 
 # %%
 
 
-def tokenize_and_chunk(dataset, num_tokens: int, seq_len: int = 512):
-    """Tokenize stories and pack into fixed-length chunks."""
+def tokenize_and_chunk(stories, vocab_size: int, seq_len: int):
+    """Tokenize stories, drop OOV tokens, pack into fixed-length chunks."""
     all_tokens = []
-    token_count = 0
-
-    for example in dataset:
+    for example in stories:
         tokens = base_tokenizer.encode(example["text"])
-        # Clamp to our restricted vocab
-        tokens = [t if t < VOCAB_SIZE else 0 for t in tokens]
+        # Keep only in-vocabulary tokens (drop the rest)
+        tokens = [t for t in tokens if t < vocab_size]
         all_tokens.extend(tokens)
-        token_count += len(tokens)
-        if token_count >= num_tokens:
-            break
 
-    # Pack into fixed-length sequences
-    all_tokens = all_tokens[: (len(all_tokens) // seq_len) * seq_len]
+    total = len(all_tokens)
+    # Trim to exact multiple of seq_len
+    all_tokens = all_tokens[: (total // seq_len) * seq_len]
     sequences = torch.tensor(all_tokens, dtype=torch.long).view(-1, seq_len)
     return sequences
 
 
-# How many tokens to use (reduce in CI)
-TOTAL_TOKENS = 500_000 if is_ci() else 8_000_000
-
-console.print(f"\n  Tokenizing {TOTAL_TOKENS:,} tokens from TinyStories...")
-clean_data = tokenize_and_chunk(raw_dataset, num_tokens=TOTAL_TOKENS)
-console.print(f"  Created [bold]{clean_data.shape[0]:,}[/bold] sequences of length {SEQ_LEN}")
+clean_data = tokenize_and_chunk(raw_dataset, VOCAB_SIZE, SEQ_LEN)
+total_tokens = clean_data.numel()
+console.print(
+    f"  Tokenized: {total_tokens:,} tokens → "
+    f"[bold]{clean_data.shape[0]:,}[/bold] sequences of {SEQ_LEN}"
+)
 
 # %% [markdown]
 # ---
@@ -212,12 +211,13 @@ console.print(f"  Created [bold]{clean_data.shape[0]:,}[/bold] sequences of leng
 # same data. Same number of tokens, same vocabulary — but the quality
 # is deliberately degraded:
 #
-# - **Shuffled sentences**: Break stories into sentences and randomize order
-# - **Duplicated content**: Repeat 30% of stories, displacing unique content
+# - **Shuffled tokens**: Randomly reorder tokens within 30% of sequences,
+#   destroying sentence structure and coherence
+# - **Duplicated content**: Copy 30% of sequences over unique ones,
+#   reducing data diversity
 # - **Random noise**: Replace 5% of tokens with random vocabulary items
 #
-# This simulates the difference between curated "textbook" data and noisy
-# web-crawled data.
+# This simulates the gap between curated data and noisy web-crawled data.
 
 # %%
 
@@ -227,24 +227,22 @@ def corrupt_data(sequences: torch.Tensor, seed: int = 42) -> torch.Tensor:
     rng = np.random.RandomState(seed)
     corrupted = sequences.clone()
     n_seqs = corrupted.shape[0]
+    seq_len = corrupted.shape[1]
 
-    # 1. Shuffle token order within 30% of sequences (destroys coherence)
-    shuffle_mask = rng.random(n_seqs) < 0.3
-    for i in np.where(shuffle_mask)[0]:
-        perm = torch.randperm(SEQ_LEN)
-        corrupted[i] = corrupted[i][perm]
+    # 1. Shuffle token order within 30% of sequences
+    shuffle_idx = np.where(rng.random(n_seqs) < 0.3)[0]
+    for i in shuffle_idx:
+        corrupted[i] = corrupted[i][torch.randperm(seq_len)]
 
-    # 2. Duplicate 30% of sequences (displacing unique content)
+    # 2. Duplicate 30% of sequences (displaces unique content)
     n_dup = int(n_seqs * 0.3)
-    dup_sources = rng.choice(n_seqs, n_dup)
-    dup_targets = rng.choice(n_seqs, n_dup, replace=False)
-    for src, tgt in zip(dup_sources, dup_targets):
-        corrupted[tgt] = corrupted[src]
+    src = rng.choice(n_seqs, n_dup)
+    tgt = rng.choice(n_seqs, n_dup, replace=False)
+    for s, t in zip(src, tgt):
+        corrupted[t] = corrupted[s]
 
     # 3. Replace 5% of tokens with random tokens
-    noise_mask = torch.tensor(
-        rng.random(corrupted.shape) < 0.05,
-    )
+    noise_mask = torch.tensor(rng.random(corrupted.shape) < 0.05)
     random_tokens = torch.randint(0, VOCAB_SIZE, corrupted.shape)
     corrupted[noise_mask] = random_tokens[noise_mask]
 
@@ -252,28 +250,34 @@ def corrupt_data(sequences: torch.Tensor, seed: int = 42) -> torch.Tensor:
 
 
 corrupted_data = corrupt_data(clean_data)
-console.print(f"  Created corrupted dataset: {corrupted_data.shape[0]:,} sequences")
+console.print(f"  Corrupted dataset: {corrupted_data.shape[0]:,} sequences")
 
 # %% [markdown]
 # ---
-# ## 5. The Training Loop
+# ## 5. Training
 #
-# Now we train two identical models — same architecture, same hyperparameters,
-# same number of training steps — but on different data.
+# We train two identical models — same architecture, same hyperparameters,
+# same number of steps — on different data.
+#
+# Hyperparameters follow standard practice for small LM pretraining:
+#
+# | Setting | Value | Notes |
+# |---------|-------|-------|
+# | Optimizer | AdamW | Standard for transformers |
+# | Learning rate | 5e-4 | High for small models |
+# | LR schedule | Cosine with warmup | Used by GPT-2, LLaMA, etc. |
+# | Beta2 | 0.95 | Lower than default 0.999, standard for LM |
+# | Weight decay | 0.1 | Regularization |
+# | Gradient clipping | 1.0 | Prevents exploding gradients |
 
 # %%
 BATCH_SIZE = 32 if not is_ci() else 8
 N_STEPS = 2000 if not is_ci() else 100
 LR = 5e-4
 WARMUP_STEPS = 200 if not is_ci() else 10
-LOG_EVERY = 50 if not is_ci() else 10
 
 
-def train_model(
-    name: str,
-    data: torch.Tensor,
-    n_steps: int = N_STEPS,
-) -> tuple[TinyGPT, list[float]]:
+def train_model(name: str, data: torch.Tensor) -> tuple[TinyGPT, list[float]]:
     """Train a TinyGPT model and return (model, loss_history)."""
     mdl = TinyGPT(
         vocab_size=VOCAB_SIZE,
@@ -291,31 +295,28 @@ def train_model(
         weight_decay=0.1,
     )
 
-    # Cosine learning rate schedule with warmup
-    def lr_schedule(step):
+    def lr_lambda(step):
         if step < WARMUP_STEPS:
             return step / max(WARMUP_STEPS, 1)
-        progress = (step - WARMUP_STEPS) / max(n_steps - WARMUP_STEPS, 1)
+        progress = (step - WARMUP_STEPS) / max(N_STEPS - WARMUP_STEPS, 1)
         return 0.5 * (1 + np.cos(np.pi * progress))
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     n_seqs = data.shape[0]
     losses = []
     mdl.train()
-
     t0 = time.time()
+
     with Progress(
         TextColumn(f"[bold]{name}[/bold]"),
         BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("{task.percentage:>3.0f}%"),
         TimeRemainingColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Training", total=n_steps)
-
-        for step in range(n_steps):
-            # Random batch
+        task = progress.add_task("", total=N_STEPS)
+        for step in range(N_STEPS):
             idx = torch.randint(0, n_seqs, (BATCH_SIZE,))
             batch = data[idx].to(device)
 
@@ -332,11 +333,10 @@ def train_model(
             progress.update(task, advance=1)
 
     elapsed = time.time() - t0
-    tokens_seen = n_steps * BATCH_SIZE * SEQ_LEN
+    tok_seen = N_STEPS * BATCH_SIZE * SEQ_LEN
+    avg_final = np.mean(losses[-50:])
     console.print(
-        f"  {name}: {elapsed:.0f}s, "
-        f"{tokens_seen:,} tokens, "
-        f"final loss: [bold]{losses[-1]:.3f}[/bold]"
+        f"  {name}: {elapsed:.0f}s | {tok_seen:,} tokens | final loss: [bold]{avg_final:.3f}[/bold]"
     )
     return mdl, losses
 
@@ -359,51 +359,39 @@ model_corrupt, losses_corrupt = train_model("Corrupted", corrupted_data)
 # ---
 # ## 6. Compare the Loss Curves
 #
-# This is where the textbook hypothesis becomes visible.
+# This is where the textbook hypothesis becomes visible. Same architecture,
+# same compute, same number of tokens — the only variable is data quality.
 
 # %%
-# Smooth losses for clearer comparison
 window = max(1, len(losses_clean) // 50)
 
 
-def smooth(values, w):
-    return np.convolve(values, np.ones(w) / w, mode="valid")
+def smooth(vals, w):
+    return np.convolve(vals, np.ones(w) / w, mode="valid")
 
 
 fig, axes = plt.subplots(1, 2, figsize=(18, 6))
 
-# Plot 1: Full loss curves
+# Loss curves
 ax = axes[0]
-steps = np.arange(len(losses_clean))
-ax.plot(steps, losses_clean, alpha=0.15, color="#4a7c74")
-ax.plot(steps, losses_corrupt, alpha=0.15, color="#8b3a3a")
-ax.plot(
-    np.arange(len(smooth(losses_clean, window))),
-    smooth(losses_clean, window),
-    color="#4a7c74",
-    linewidth=2.5,
-    label="Clean data",
-)
-ax.plot(
-    np.arange(len(smooth(losses_corrupt, window))),
-    smooth(losses_corrupt, window),
-    color="#8b3a3a",
-    linewidth=2.5,
-    label="Corrupted data",
-)
+ax.plot(losses_clean, alpha=0.12, color="#4a7c74")
+ax.plot(losses_corrupt, alpha=0.12, color="#8b3a3a")
+s_clean = smooth(losses_clean, window)
+s_corrupt = smooth(losses_corrupt, window)
+ax.plot(range(len(s_clean)), s_clean, color="#4a7c74", linewidth=2.5, label="Clean data")
+ax.plot(range(len(s_corrupt)), s_corrupt, color="#8b3a3a", linewidth=2.5, label="Corrupted data")
 ax.set_xlabel("Training Step")
 ax.set_ylabel("Cross-Entropy Loss")
 ax.set_title("Loss Curves: Clean vs Corrupted Data")
 ax.legend(fontsize=11)
 ax.grid(True, alpha=0.3)
 
-# Plot 2: Final loss comparison
+# Final loss bars
 ax = axes[1]
-final_clean = np.mean(losses_clean[-100:])
-final_corrupt = np.mean(losses_corrupt[-100:])
-
+final_clean = float(np.mean(losses_clean[-50:]))
+final_corrupt = float(np.mean(losses_corrupt[-50:]))
 bars = ax.bar(
-    ["Clean Data", "Corrupted Data"],
+    ["Clean\nData", "Corrupted\nData"],
     [final_clean, final_corrupt],
     color=["#4a7c74", "#8b3a3a"],
     width=0.5,
@@ -414,17 +402,17 @@ for bar, val in zip(bars, [final_clean, final_corrupt]):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
         bar.get_height() + 0.05,
-        f"{val:.3f}",
+        f"{val:.2f}",
         ha="center",
-        fontsize=13,
+        fontsize=14,
         fontweight="bold",
     )
-ax.set_ylabel("Final Loss (lower is better)")
-ax.set_title("Final Loss After Training")
+ax.set_ylabel("Final Loss (lower = better predictions)")
+ax.set_title("Final Loss Comparison")
 ax.set_ylim(0, max(final_clean, final_corrupt) * 1.3)
 
 fig.suptitle(
-    "The Textbook Hypothesis: Data Quality Beats Data Quantity",
+    "The Textbook Hypothesis in Miniature",
     fontsize=14,
     fontweight="bold",
     y=1.02,
@@ -435,45 +423,51 @@ show(fig, filename="05-loss-curves.png")
 # %%
 gap = final_corrupt - final_clean
 pct = (gap / final_clean) * 100
-console.print(f"\n  Clean final loss:     [bold green]{final_clean:.3f}[/bold green]")
-console.print(f"  Corrupted final loss: [bold red]{final_corrupt:.3f}[/bold red]")
-console.print(f"  Gap: [bold]{gap:.3f}[/bold] ({pct:.0f}% worse)")
+console.print(f"\n  Clean final loss:     [bold green]{final_clean:.3f}[/]")
+console.print(f"  Corrupted final loss: [bold red]{final_corrupt:.3f}[/]")
+console.print(f"  Gap: [bold]+{gap:.3f}[/bold] ({pct:.0f}% higher loss on corrupted data)")
 
 # %% [markdown]
-# The clean-data model reaches a lower loss in the same number of steps.
-# Same architecture, same compute budget, same number of tokens — the
-# only difference is data quality. This is the textbook hypothesis in
-# miniature: curated data learns more efficiently than noisy data.
+# Same model, same compute budget, same token count. The only difference
+# is data quality — and it shows clearly in the loss curve. Curated data
+# trains more efficiently than noisy data. This is the core insight behind
+# Microsoft's Phi series of models.
 
 # %% [markdown]
 # ---
 # ## 7. Generate Text
 #
-# Let's see what these models actually produce. We will give both the
-# same prompt and compare their completions.
+# Let's see what these models actually produce. We give both models the
+# same prompt and compare completions.
 
 # %%
 PROMPTS = [
     "Once upon a time, there was a little",
-    "The dog ran to the",
-    "She was very happy because",
-    "One day, a boy found a",
+    "The dog ran to the park and",
+    "She was very happy because her",
+    "One day, a boy found a big",
 ]
 
 
 def generate_text(mdl, prompt, max_tokens=80):
-    """Generate text from a prompt."""
+    """Generate text from a prompt using our trained model."""
     mdl.eval()
     tokens = base_tokenizer.encode(prompt)
-    tokens = [t if t < VOCAB_SIZE else 0 for t in tokens]
+    # Keep only in-vocabulary tokens
+    tokens = [t for t in tokens if t < VOCAB_SIZE]
+    if not tokens:
+        tokens = [base_tokenizer.eos_token_id]
     input_ids = torch.tensor([tokens], device=device)
 
     with torch.no_grad():
-        output_ids = mdl.generate(input_ids, max_new_tokens=max_tokens)
+        output_ids = mdl.generate(
+            input_ids,
+            max_new_tokens=max_tokens,
+            temperature=0.8,
+            top_k=50,
+        )
 
-    # Decode, handling tokens that map to our restricted vocab
-    generated = output_ids[0].tolist()
-    return base_tokenizer.decode(generated, skip_special_tokens=True)
+    return base_tokenizer.decode(output_ids[0].tolist(), skip_special_tokens=True)
 
 
 # %%
@@ -486,41 +480,47 @@ for prompt in PROMPTS:
     corrupt_text = generate_text(model_corrupt, prompt)
 
     console.print("  [green]Clean model:[/green]")
-    console.print(f"    {clean_text[:200]}\n")
+    # Show only the generated part (after prompt)
+    console.print(f"    {clean_text[:250]}\n")
     console.print("  [red]Corrupted model:[/red]")
-    console.print(f"    {corrupt_text[:200]}\n")
+    console.print(f"    {corrupt_text[:250]}\n")
     console.print("  " + "─" * 60 + "\n")
 
 # %% [markdown]
-# The clean-data model should produce more coherent stories with consistent
-# characters and plot. The corrupted-data model will likely produce grammatical
-# fragments that do not hold together — because it learned from shuffled,
-# duplicated, noisy text.
+# With enough training steps (2000+), the clean-data model produces
+# recognizable story fragments — simple sentences about characters doing
+# things. The corrupted-data model generates less coherent text because
+# it learned from shuffled, duplicated, and noisy sequences.
+#
+# If you only ran 100 steps (CI mode), both models will produce mostly
+# noise — they need more training. Run with the full 2000 steps to see
+# the difference clearly.
 
 # %% [markdown]
 # ---
-# ## 8. Visualize What the Model Learned
+# ## 8. Training Dynamics
 #
-# Let's look at the learning rate schedule and the loss landscape.
+# Let's visualize the learning rate schedule and how the loss distribution
+# shifts during training.
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(16, 5))
 
 # LR schedule
 ax = axes[0]
-lr_values = []
+lr_vals = []
 for step in range(N_STEPS):
     if step < WARMUP_STEPS:
         lr_val = LR * step / max(WARMUP_STEPS, 1)
     else:
-        progress = (step - WARMUP_STEPS) / max(N_STEPS - WARMUP_STEPS, 1)
-        lr_val = LR * 0.5 * (1 + np.cos(np.pi * progress))
-    lr_values.append(lr_val)
+        prog = (step - WARMUP_STEPS) / max(N_STEPS - WARMUP_STEPS, 1)
+        lr_val = LR * 0.5 * (1 + np.cos(np.pi * prog))
+    lr_vals.append(lr_val)
 
-ax.plot(lr_values, color="#b87333", linewidth=2)
+ax.plot(lr_vals, color="#b87333", linewidth=2)
 ax.set_xlabel("Training Step")
 ax.set_ylabel("Learning Rate")
-ax.set_title("Cosine Learning Rate Schedule with Warmup")
+ax.set_title("Cosine LR Schedule with Linear Warmup")
 ax.axvline(
     WARMUP_STEPS,
     color="#6b7091",
@@ -531,69 +531,78 @@ ax.axvline(
 ax.legend()
 ax.grid(True, alpha=0.3)
 
-# Loss distribution over training
+# Loss distribution shift
 ax = axes[1]
-early = losses_clean[: min(200, len(losses_clean))]
-late = losses_clean[max(0, len(losses_clean) - 200) :]
-ax.hist(early, bins=30, alpha=0.6, color="#8b3a3a", label="First 200 steps")
-ax.hist(late, bins=30, alpha=0.6, color="#4a7c74", label="Last 200 steps")
+n_hist = min(200, len(losses_clean) // 4)
+early = losses_clean[:n_hist]
+late = losses_clean[-n_hist:]
+ax.hist(early, bins=30, alpha=0.6, color="#8b3a3a", label=f"First {n_hist} steps", density=True)
+ax.hist(late, bins=30, alpha=0.6, color="#4a7c74", label=f"Last {n_hist} steps", density=True)
 ax.set_xlabel("Loss Value")
-ax.set_ylabel("Frequency")
+ax.set_ylabel("Density")
 ax.set_title("Loss Distribution: Early vs Late Training")
 ax.legend()
 ax.grid(True, alpha=0.3)
 
-fig.suptitle(
-    "Training Dynamics",
-    fontsize=13,
-    fontweight="bold",
-    y=1.02,
-)
+fig.suptitle("Training Dynamics", fontsize=13, fontweight="bold", y=1.02)
 fig.tight_layout()
 show(fig, filename="05-training-dynamics.png")
 
 # %% [markdown]
 # ---
-# ## 9. Save Your Models
+# ## 9. Cost Estimate and Saved Artifacts
 #
-# You now own two trained language models. Let's save them.
+# Let's calculate the actual compute cost of this experiment.
 
 # %%
 from microscale.viz import _output_dir
 
+tok_trained = N_STEPS * BATCH_SIZE * SEQ_LEN * 2  # x2 for both models
+flops_per_token = 6 * n_params  # ~6N for forward + backward
+total_flops = tok_trained * flops_per_token
+
+table = Table(title="Training Summary")
+table.add_column("Metric", style="bold")
+table.add_column("Value", justify="right")
+table.add_row("Model size", f"{n_params:,} parameters")
+table.add_row("Tokens trained (both models)", f"{tok_trained:,}")
+table.add_row("Total FLOPs", f"{total_flops:.2e}")
+table.add_row("Estimated T4 cost", f"~${total_flops / 6.5e13:.2f}")
+table.add_row("Estimated M-series cost", "Free (your laptop)")
+console.print(table)
+
+# Save models
 output_path = _output_dir()
 torch.save(model_clean.state_dict(), output_path / "05-model-clean.pt")
 torch.save(model_corrupt.state_dict(), output_path / "05-model-corrupted.pt")
 
 clean_size = os.path.getsize(output_path / "05-model-clean.pt") / 1e6
-console.print("\n  Saved models to outputs/")
-console.print(f"  Model size: {clean_size:.1f} MB each")
-console.print(f"  Total training tokens: {N_STEPS * BATCH_SIZE * SEQ_LEN:,}")
+console.print(f"\n  Models saved to outputs/ ({clean_size:.1f} MB each)")
 
 # %% [markdown]
 # ---
 # ## What You Learned
 #
-# | Finding | Evidence |
+# | Finding | Your evidence |
 # |---|---|
-# | You can train a real LM on a laptop | 10.7M params, ~10 min |
-# | Loss starts at ln(vocab) | ~9.2 for 10K vocab |
-# | Clean data reaches lower loss | Same compute, better result |
-# | Corrupted data produces incoherent text | Side-by-side generation |
-# | Cosine LR + warmup is standard | Used in GPT-2, LLaMA, etc. |
+# | Initial loss = ln(vocab_size) | Started at ~9.2 = ln(10000) |
+# | Clean data trains faster | Lower loss at same step count |
+# | Data quality > data quantity | Same tokens, different quality, different result |
+# | Cosine LR + warmup is standard | Smooth decay after linear ramp-up |
+# | Small models learn fast | 10M params, minutes on a laptop |
 #
 # ### Artifacts in `outputs/`
 #
-# | File | What it shows |
-# |------|---------------|
+# | File | What it is |
+# |------|-----------|
 # | `05-loss-curves.png` | Clean vs corrupted training curves |
 # | `05-training-dynamics.png` | LR schedule and loss distribution |
-# | `05-model-clean.pt` | Your trained clean-data model |
+# | `05-model-clean.pt` | Your trained clean-data model (43 MB) |
 # | `05-model-corrupted.pt` | Your trained corrupted-data model |
 #
 # ### References
 #
-# - Eldan & Li, "TinyStories" (2023, Microsoft Research)
-# - Gunasekar et al., "Textbooks Are All You Need" (2023)
+# - Eldan & Li, "TinyStories" (2023, arXiv:2305.07759)
+# - Gunasekar et al., "Textbooks Are All You Need" (2023, arXiv:2306.11644)
 # - Radford et al., "Language Models are Unsupervised Multitask Learners"
 #   (GPT-2, 2019)
