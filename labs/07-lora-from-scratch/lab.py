@@ -182,7 +182,57 @@ console.print(
 
 # %% [markdown]
 # ---
-# ## 4. Attach LoRA to Qwen3-0.6B
+# ## 4. Baseline — What Does the Untrained Model Say?
+#
+# Before attaching LoRA, let's capture the model's responses to our
+# test prompts. We will compare these to the fine-tuned outputs at the
+# end of the lab.
+
+# %%
+TEST_PROMPTS = [
+    "How do I make garlic bread?",
+    "Convert 250ml of milk to cups",
+    "What can I cook with mushrooms and pasta?",
+    "How do I know when bread is done baking?",
+]
+
+
+def baseline_generate(prompt, max_tokens=80):
+    """Generate from the base model (no LoRA yet)."""
+    messages = [{"role": "user", "content": prompt}]
+    input_ids = tokenizer.apply_chat_template(
+        messages,
+        return_tensors="pt",
+        add_generation_prompt=True,
+        enable_thinking=False,
+    ).to(device)
+    with torch.no_grad():
+        output = model.generate(
+            input_ids,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    text = tokenizer.decode(
+        output[0][input_ids.shape[1] :],
+        skip_special_tokens=True,
+    )
+    if "</think>" in text:
+        text = text.split("</think>")[-1].strip()
+    return text
+
+
+baseline_responses = {}
+console.print("\n[bold]Baseline (before LoRA training)[/bold]\n")
+for prompt in TEST_PROMPTS:
+    resp = baseline_generate(prompt)
+    baseline_responses[prompt] = resp
+    console.print(f"  [bold]Q:[/bold] {prompt}")
+    console.print(f"  [dim]A:[/dim] {resp[:200]}\n")
+
+# %% [markdown]
+# ---
+# ## 5. Attach LoRA to Qwen3-0.6B
 #
 # We wrap the **query projection** (`q_proj`) in every attention layer.
 # This is the most common choice — the query determines *what to attend to*,
@@ -211,7 +261,7 @@ console.print(f"  Compression: {n_base / trainable:.0f}x fewer trainable params"
 
 # %% [markdown]
 # ---
-# ## 5. Prepare Training Data
+# ## 6. Prepare Training Data
 #
 # We build a small dataset of 100 examples in the **cooking domain**:
 # - 50 instruction-following (recipe questions and answers)
@@ -235,7 +285,7 @@ console.print(f"  Dataset: {len(INSTRUCTIONS)} instructions + {len(TOOL_CALLS)} 
 
 # %% [markdown]
 # ---
-# ## 6. Format and Tokenize
+# ## 7. Format and Tokenize
 #
 # We format each example using Qwen3's chat template, which uses ChatML
 # with `<|im_start|>` / `<|im_end|>` tags.
@@ -291,7 +341,7 @@ console.print(f"  Average length: {np.mean([len(x) for x in all_input_ids]):.0f}
 
 # %% [markdown]
 # ---
-# ## 7. Train
+# ## 8. Train
 #
 # Simple training loop: sample a batch, compute loss, update only the
 # LoRA parameters.
@@ -350,7 +400,7 @@ console.print(f"\n  Done in {elapsed:.0f}s — final loss: {losses[-1]:.4f}")
 
 # %% [markdown]
 # ---
-# ## 8. Loss Curve
+# ## 9. Loss Curve
 
 # %%
 model.eval()
@@ -372,17 +422,12 @@ show(fig, filename="07-lora-loss-curve.png")
 
 # %% [markdown]
 # ---
-# ## 9. Test the Fine-Tuned Model
+# ## 10. Before vs After — The Effect of Fine-Tuning
 #
-# Let's see if the model learned our cooking domain.
+# Let's generate with the fine-tuned model and compare side-by-side
+# with the baseline responses we captured before training.
 
 # %%
-TEST_PROMPTS = [
-    "How do I make garlic bread?",
-    "Convert 250ml of milk to cups",
-    "What can I cook with mushrooms and pasta?",
-    "How do I know when bread is done baking?",
-]
 
 
 def generate_response(prompt, max_tokens=100):
@@ -399,30 +444,33 @@ def generate_response(prompt, max_tokens=100):
             input_ids,
             max_new_tokens=max_tokens,
             do_sample=False,
-            temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
         )
     response = tokenizer.decode(
         output[0][input_ids.shape[1] :],
         skip_special_tokens=True,
     )
-    # Clean up thinking tags if present
     if "</think>" in response:
         response = response.split("</think>")[-1].strip()
     return response
 
 
 # %%
-console.print("\n[bold]Testing Fine-Tuned Model[/bold]\n")
+console.print("\n[bold]Before vs After LoRA Fine-Tuning[/bold]\n")
 
 for prompt in TEST_PROMPTS:
-    response = generate_response(prompt)
-    console.print(f"  [bold]Q:[/bold] {prompt}")
-    console.print(f"  [green]A:[/green] {response[:250]}\n")
+    after_response = generate_response(prompt)
+
+    console.print(f"  [bold]Q:[/bold] {prompt}\n")
+    console.print("  [dim]Before (base model):[/dim]")
+    console.print(f"    {baseline_responses[prompt][:200]}\n")
+    console.print("  [green]After LoRA fine-tuning:[/green]")
+    console.print(f"    {after_response[:200]}\n")
+    console.print("  " + "─" * 60 + "\n")
 
 # %% [markdown]
 # ---
-# ## 10. Merge and Verify
+# ## 11. Merge and Verify
 #
 # The magic of LoRA: we can fold the adapter directly into the base
 # weights. The merged model runs at the same speed as the original
@@ -459,7 +507,7 @@ console.print(
 
 # %% [markdown]
 # ---
-# ## 11. Save the Adapter
+# ## 12. Save the Adapter
 #
 # The adapter is just the A and B matrices — a few MB, not the full
 # 1.2 GB model.
@@ -483,7 +531,7 @@ console.print(f"  Savings: [bold]{1200 / adapter_size:.0f}x smaller[/bold]")
 
 # %% [markdown]
 # ---
-# ## 12. Parameter Efficiency Summary
+# ## 13. Parameter Efficiency Summary
 
 # %%
 table = Table(title="LoRA Efficiency Summary")
