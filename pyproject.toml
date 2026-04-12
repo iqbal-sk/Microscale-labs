@@ -20,6 +20,7 @@ dependencies = [
     "plotly>=5.20",
     "rich>=13.7",
     "tqdm>=4.66",
+    "datasets>=3.0",
 ]
 
 [project.optional-dependencies]
