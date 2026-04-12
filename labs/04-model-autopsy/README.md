@@ -8,8 +8,8 @@
 
 - Parse the safetensors binary format to read model metadata without loading weights
 - Detect architecture choices (GQA ratio, tied embeddings, FFN type) from tensor names alone
-- Compare 3 SLMs side by side: parameter distribution, design trade-offs
-- Understand why vocabulary size dominates small model parameter budgets
+- Compare 4 SLMs (360M to 3.8B) side by side: parameter distribution, design trade-offs
+- See how the vocabulary tax shrinks as models grow larger
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@
 
 ## Artifact
 
-A comparison table and visualizations comparing Qwen3-0.6B, SmolLM3-3B, and Phi-4-mini.
+A comparison table and visualizations comparing SmolLM2-360M, Qwen3-0.6B, SmolLM3-3B, and Phi-4-mini.
 
 ## Run
 

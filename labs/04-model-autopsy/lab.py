@@ -25,10 +25,10 @@
 #    a 35KB header without downloading gigabytes of weights
 # 2. **Detect** architecture choices from tensor names alone: GQA ratio,
 #    tied embeddings, SwiGLU, fused projections
-# 3. **Compare** three production SLMs side by side and understand why they
-#    made different design trade-offs
-# 4. **Measure** where parameters actually go — and why vocabulary size
-#    dominates in small models
+# 3. **Compare** four production SLMs side by side — two sub-1B and two 3B+ —
+#    and understand why they made different design trade-offs
+# 4. **Measure** where parameters actually go — and see how the vocabulary
+#    tax shrinks as models get larger
 #
 # ---
 #
@@ -39,8 +39,8 @@
 # how many heads, whether embeddings are tied, what kind of FFN it uses.
 # You do not need to load a single weight to know all of this.
 #
-# Today you will dissect three models and build a comparison table from
-# their anatomy.
+# Today you will dissect four models — from 360M to 3.8B parameters —
+# and build a comparison table from their anatomy.
 
 # %% [markdown]
 # ---
@@ -167,6 +167,7 @@ from microscale.autopsy import (
 )
 
 MODELS = {
+    "SmolLM2-360M": "HuggingFaceTB/SmolLM2-360M",
     "Qwen3-0.6B": "Qwen/Qwen3-0.6B",
     "SmolLM3-3B": "HuggingFaceTB/SmolLM3-3B",
     "Phi-4-mini": "microsoft/Phi-4-mini-instruct",
@@ -213,14 +214,16 @@ for label, fn in rows:
 console.print(table)
 
 # %% [markdown]
-# **Observations:**
+# **What jumps out:**
 #
-# - **Qwen3-0.6B** has a huge vocabulary (152K) relative to its hidden
-#   size (1024), and uses QK-Norm — a feature the other two lack.
-# - **SmolLM3-3B** has the largest FFN ratio (intermediate = 5.4x hidden),
-#   which means most of its parameters are in the feed-forward layers.
+# - **SmolLM2-360M** uses the smallest vocabulary (49K) and the most
+#   aggressive GQA (10:3). At 360M, every parameter counts.
+# - **Qwen3-0.6B** has a huge vocabulary (152K) relative to its size,
+#   and is the only model with QK-Norm.
+# - **SmolLM3-3B** has the largest FFN ratio (intermediate = 5.4x hidden)
+#   — most of its parameters are in the feed-forward layers.
 # - **Phi-4-mini** fuses Q/K/V into a single `qkv_proj` matrix and
-#   gate/up into `gate_up_proj`, halving the tensor count (194 vs 311).
+#   gate/up into `gate_up_proj`, halving its tensor count to 194.
 
 # %% [markdown]
 # ---
@@ -230,11 +233,11 @@ console.print(table)
 # parameter breakdown.
 
 # %%
-fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 colors = ["#b87333", "#4a7c74", "#5a7a3d", "#6b7091", "#d4c8a8"]
 components = ["Embedding", "Attention", "FFN", "Norm", "Other"]
 
-for ax, name in zip(axes, MODELS):
+for ax, name in zip(axes.flat, MODELS):
     a = anatomies[name]
     sizes = [
         a.embedding_params,
@@ -274,18 +277,21 @@ fig.tight_layout()
 show(fig, filename="04-parameter-distribution.png")
 
 # %% [markdown]
-# **The vocabulary tax in small models:**
+# **The vocabulary tax — and how it changes with scale:**
 #
-# Qwen3-0.6B spends **20.7%** of its parameters on the embedding table
-# (152K vocab x 1024 hidden = 156M parameters). That is more than all
-# its attention parameters combined.
+# Compare the two smallest models:
+# - **SmolLM2-360M** keeps its vocab small (49K) to spend only ~13% on
+#   embeddings. Smart at this scale — every parameter matters.
+# - **Qwen3-0.6B** uses a much larger vocab (152K) and pays ~26% for it.
+#   That is a quarter of the model doing nothing but mapping token IDs.
 #
-# SmolLM3-3B spends only **8.5%** on embeddings (128K vocab x 2048 hidden),
-# and its FFN dominates at **79.2%** because its intermediate size is
-# 5.4x the hidden size — an unusually high ratio.
+# At 3B+, the tax fades:
+# - **SmolLM3-3B** spends only 8.5% on embeddings despite 128K vocab,
+#   freeing budget for an enormous 79% FFN ratio.
+# - **Phi-4-mini** has the largest vocab (200K) but at 3.8B it is only 16%.
 #
-# Phi-4-mini has the largest vocabulary (200K) but at 3B total, it
-# can afford it — embeddings are a reasonable 16%.
+# The pattern: vocabulary is a fixed cost. As models grow, it becomes
+# a smaller fraction. Small models must choose their vocab size carefully.
 
 # %% [markdown]
 # ---
@@ -474,10 +480,10 @@ for name in model_names:
 # | Finding | Evidence |
 # |---|---|
 # | Headers reveal architecture | 35KB tells you everything |
-# | Embeddings dominate small models | 21% for Qwen3-0.6B |
-# | FFN ratios vary | SmolLM3 uses 5.4x vs standard 4x |
-# | GQA saves KV memory | 2:1 to 4:1 compression |
-# | Fused projections halve tensor count | 194 vs 311 tensors |
+# | Vocab tax shrinks with scale | 26% at 596M vs 8.5% at 3B |
+# | FFN ratios vary dramatically | 2.7x to 5.4x expansion |
+# | GQA gets more aggressive | 2:1 to 4:1 compression |
+# | Fused projections halve tensor count | 194 vs 311 |
 #
 # ### Artifacts in `outputs/`
 #
