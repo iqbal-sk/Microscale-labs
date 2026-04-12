@@ -25,6 +25,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add notebooks/
+          # Force-add: bypasses .gitignore (notebooks/*.ipynb is ignored
+          # locally so devs don't commit outputs, but CI should commit them)
+          git add -f notebooks/
           git diff --cached --quiet || git commit -m "chore: sync generated notebooks"
           git push
