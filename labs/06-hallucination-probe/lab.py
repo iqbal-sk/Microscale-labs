@@ -476,7 +476,141 @@ show(fig, filename="06-hallucination-rates.png")
 
 # %% [markdown]
 # ---
-# ## 7. The Kalai-Vempala Bound
+# ## 7. Response Analysis — Do Wrong Answers Look Different?
+#
+# Do hallucinated responses have telltale signs? Let's analyze response
+# length by category and verdict.
+
+# %%
+# Compute response length statistics
+all_lengths = {
+    "common_correct": [],
+    "common_wrong": [],
+    "longtail_correct": [],
+    "longtail_wrong": [],
+}
+
+for cat in ["common", "long_tail"]:
+    cat_key = "common" if cat == "common" else "longtail"
+    for entry in results[cat]:
+        if entry["verdict"] == "error":
+            continue
+        key = f"{cat_key}_{'correct' if entry['verdict'] == 'correct' else 'wrong'}"
+        all_lengths[key].append(len(entry["response"]))
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+
+# Panel 1: Response length distributions by category and verdict
+ax = axes[0]
+groups = [
+    ("Common\nCorrect", all_lengths["common_correct"], "#4a7c74"),
+    ("Common\nWrong", all_lengths["common_wrong"], "#8b3a3a"),
+    ("Long-tail\nCorrect", all_lengths["longtail_correct"], "#5a7a3d"),
+    ("Long-tail\nWrong", all_lengths["longtail_wrong"], "#b87333"),
+]
+
+positions = list(range(len(groups)))
+labels = [g[0] for g in groups]
+data = [g[1] if g[1] else [0] for g in groups]
+colors_box = [g[2] for g in groups]
+
+bp = ax.boxplot(data, positions=positions, widths=0.5, patch_artist=True, showfliers=True)
+for patch, c in zip(bp["boxes"], colors_box):
+    patch.set_facecolor(c)
+    patch.set_alpha(0.7)
+    patch.set_edgecolor("#1a1f3a")
+
+ax.set_xticks(positions)
+ax.set_xticklabels(labels, fontsize=9)
+ax.set_ylabel("Response Length (characters)")
+ax.set_title("Response Length by Category and Verdict")
+ax.grid(True, alpha=0.3, axis="y")
+
+# Panel 2: Detailed per-question error type
+ax = axes[1]
+common_verdicts = [e["verdict"] for e in results["common"]]
+longtail_verdicts = [e["verdict"] for e in results["long_tail"]]
+
+from collections import Counter
+
+verdicts_common = Counter(common_verdicts)
+verdicts_longtail = Counter(longtail_verdicts)
+
+categories = ["Correct", "Incorrect", "Error"]
+common_counts = [
+    verdicts_common.get("correct", 0),
+    verdicts_common.get("incorrect", 0),
+    verdicts_common.get("error", 0),
+]
+longtail_counts = [
+    verdicts_longtail.get("correct", 0),
+    verdicts_longtail.get("incorrect", 0),
+    verdicts_longtail.get("error", 0),
+]
+
+x = np.arange(len(categories))
+width = 0.35
+ax.bar(
+    x - width / 2,
+    common_counts,
+    width,
+    label="Common Knowledge",
+    color="#4a7c74",
+    edgecolor="#1a1f3a",
+)
+ax.bar(
+    x + width / 2,
+    longtail_counts,
+    width,
+    label="Long-Tail Facts",
+    color="#8b3a3a",
+    edgecolor="#1a1f3a",
+)
+
+for i, (c, lt) in enumerate(zip(common_counts, longtail_counts)):
+    ax.text(i - width / 2, c + 0.3, str(c), ha="center", fontweight="bold")
+    ax.text(i + width / 2, lt + 0.3, str(lt), ha="center", fontweight="bold")
+
+ax.set_xticks(x)
+ax.set_xticklabels(categories)
+ax.set_ylabel("Number of Questions")
+ax.set_title("Verdict Breakdown by Category")
+ax.legend()
+ax.grid(True, alpha=0.3, axis="y")
+
+fig.suptitle(
+    "How Hallucinations Differ from Correct Answers",
+    fontsize=14,
+    fontweight="bold",
+    y=1.02,
+)
+fig.tight_layout()
+show(fig, filename="06-response-analysis.png")
+
+# Summary statistics
+console.print("\n[bold]Response Length Analysis[/bold]")
+for label, lens, _ in groups:
+    if lens:
+        mean_len = np.mean(lens)
+        console.print(
+            f"  {label.replace(chr(10), ' '):25s}  "
+            f"n={len(lens):2d}  "
+            f"mean={mean_len:5.0f} chars  "
+            f"median={int(np.median(lens)):4d}"
+        )
+
+# %% [markdown]
+# **Patterns to watch for:**
+# - Wrong answers are sometimes *shorter* — the model gives up
+# - Wrong answers are sometimes *longer* — the model rambles, generating
+#   plausible-looking but incorrect detail (classic hallucination)
+# - Correct common-knowledge answers tend to be crisp and confident
+# - Long-tail wrong answers often contain invented numbers or names
+
+# %% [markdown]
+# ---
+# ## 8. The Kalai-Vempala Bound
 #
 # In 2024, Kalai and Vempala proved a mathematical lower bound on LLM
 # hallucination (STOC 2024, arXiv:2311.14648):
