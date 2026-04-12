@@ -17,21 +17,35 @@
 #
 # **Act II — Inside the Machine** | CPU or Apple Silicon | ~60–90 minutes
 #
-# Every transformer prediction passes through attention layers where tokens
-# decide how much to "look at" each other. In this lab you will crack open
-# a real language model, extract the raw attention weights from all 448 heads,
-# and see for yourself what those patterns look like.
+# ---
 #
-# You will also ablate individual heads — zero them out — and measure whether
-# the model even notices. The result is often surprising: most heads barely
-# matter, and a few are load-bearing.
+# ### What you will learn
 #
-# **What you will produce:**
-# - A gallery of attention heatmaps with annotated pattern types
-# - An ablation impact map showing which heads the model depends on
+# By the end of this lab you will be able to:
+#
+# 1. **Extract** raw attention weight matrices from a real 596M-parameter language model
+# 2. **Visualize** what 448 attention heads actually look like — and read the patterns
+# 3. **Identify** three documented head types: attention sinks, previous-token heads,
+#    and broad-context heads
+# 4. **Observe** how Grouped Query Attention (GQA) makes paired heads share structure
+# 5. **Measure** which heads the model depends on by ablating them one at a time
+# 6. **Conclude**, from your own data, that most heads are redundant — the empirical
+#    basis for structured pruning
+#
+# ---
+#
+# ### The idea
+#
+# When a transformer processes text, every token gets to "look at" every earlier
+# token through attention. But what does that attention actually look like? Are all
+# heads doing the same thing? Do they all matter equally?
+#
+# You are about to find out — not from a diagram, but from the actual weight
+# matrices of a production language model running on your machine.
 
 # %% [markdown]
-# ## Setup
+# ---
+# ## 1. Setup
 
 # %%
 import subprocess
@@ -69,47 +83,46 @@ from rich.table import Table
 console = Console()
 
 # %% [markdown]
-# ## Part 1: Loading the Model
+# ---
+# ## 2. Meet the Model
 #
-# We are using **Qwen3-0.6B**, a 596-million-parameter language model from Alibaba.
-# A few things to know about its architecture:
+# We are working with **Qwen3-0.6B** — a 596M-parameter language model. Here is
+# what matters for this lab:
 #
-# | Property | Value |
-# |----------|-------|
-# | Parameters | 596M |
-# | Layers | 28 |
-# | Query heads | 16 |
-# | Key-Value heads | 8 (Grouped Query Attention) |
-# | Head dimension | 128 |
-# | Vocabulary | 151,936 tokens |
+# | | |
+# |---|---|
+# | **Layers** | 28 transformer blocks stacked in sequence |
+# | **Query heads** | 16 per layer — each asks "what should I attend to?" |
+# | **Key-Value heads** | 8 per layer — shared between pairs of query heads (GQA) |
+# | **Head dimension** | 128 values per head |
+# | **Total heads** | 28 layers × 16 heads = **448 attention matrices** |
 #
-# The **Grouped Query Attention (GQA)** means every pair of query heads shares
-# one key-value head. Heads 0 and 1 share KV, heads 2 and 3 share KV, and so on.
-# You will see this in the attention patterns: paired heads often look similar
-# because they attend to the same keys, just with different queries.
-#
-# We load with `attn_implementation="eager"` because the faster SDPA kernel
-# does not support returning attention weights.
+# The **Grouped Query Attention** design means heads 0–1 share key/value
+# projections, heads 2–3 share another pair, and so on. This saves memory
+# while letting each query head specialize through its own projection.
 
 # %%
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-print("Loading Qwen3-0.6B (this may take a minute on first run)...")
+print("Loading Qwen3-0.6B...")
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
 model = AutoModelForCausalLM.from_pretrained(
     "Qwen/Qwen3-0.6B",
-    dtype=torch.float32,  # float32 for stable attention extraction
-    attn_implementation="eager",  # required for output_attentions=True
+    dtype=torch.float32,
+    attn_implementation="eager",  # needed to return attention weights
 ).to(device)
 model.eval()
-print(f"Loaded: {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M parameters on {device}")
+
+n_params = sum(p.numel() for p in model.parameters()) / 1e6
+print(f"Ready: {n_params:.0f}M parameters on {device}")
 
 # %% [markdown]
-# ## Part 2: Extracting Attention Weights
+# ---
+# ## 3. Extract the Attention Weights
 #
-# Let's feed a simple sentence through the model and capture every attention
-# matrix. With 28 layers and 16 heads per layer, that is **448 attention matrices**,
-# each of shape (sequence_length × sequence_length).
+# We feed one sentence through the model and capture every attention matrix.
+# Each matrix tells us: for each token, how much did it attend to every
+# other token?
 
 # %%
 INPUT_TEXT = (
@@ -117,408 +130,562 @@ INPUT_TEXT = (
 )
 
 result = extract_attention(model, tokenizer, INPUT_TEXT, device=device)
-weights = result["weights"]  # list of 28 arrays, each (16, seq_len, seq_len)
+weights = result["weights"]  # 28 arrays, each (16, seq_len, seq_len)
 tokens = result["tokens"]
 
 n_layers = len(weights)
 n_heads = weights[0].shape[0]
 seq_len = weights[0].shape[1]
 
-table = Table(title="Extraction Summary")
-table.add_column("Property", style="bold")
-table.add_column("Value", justify="right")
-table.add_row("Input text", INPUT_TEXT[:60] + "...")
-table.add_row("Tokens", str(seq_len))
-table.add_row("Layers", str(n_layers))
-table.add_row("Heads per layer", str(n_heads))
-table.add_row("Total attention matrices", str(n_layers * n_heads))
-table.add_row("Token list", " | ".join(tokens))
-console.print(table)
+console.print(
+    f"\n  Extracted [bold]{n_layers * n_heads}[/bold] attention matrices"
+    f"  ({n_layers} layers × {n_heads} heads)"
+    f"  for [bold]{seq_len}[/bold] tokens\n"
+)
+console.print(f"  Tokens: {' · '.join(tokens)}")
 
 # %% [markdown]
-# ## Part 3: The Landscape View
+# ---
+# ## 4. The Landscape — All 448 Heads at a Glance
 #
-# Before zooming into individual heads, let's get a bird's-eye view of all 448
-# heads. We will compute summary metrics for each head:
+# Before zooming in, let's see the big picture. For every head we compute three
+# numbers:
 #
-# - **Entropy**: How spread out is the attention? High entropy means the head
-#   attends broadly. Low entropy means it concentrates on a few positions.
-# - **Sink strength**: How much attention flows to the first token (position 0)?
-#   Many heads in language models use the first token as an "attention sink" —
-#   a safe default when they have nothing useful to attend to.
-# - **Previous-token strength**: How much attention flows to the immediately
-#   preceding token? Some heads specialize in "look at what came just before me."
+# - **Sink strength** — how much attention goes to the very first token?
+# - **Previous-token strength** — how much goes to the token right before?
+# - **Entropy** — how spread out is the attention distribution?
+#
+# Each metric becomes a 28×16 pixel in the heatmaps below. One pixel = one head.
 
 # %%
 summary = compute_head_summary(weights)
 
-# Show the three key metrics as 28x16 heatmaps
-fig, axes = plt.subplots(1, 3, figsize=(18, 8))
+fig, axes = plt.subplots(1, 3, figsize=(20, 9))
 
-metrics = [
-    ("sink", "Sink Strength\n(attention to first token)", "YlOrRd"),
-    ("prev_token", "Previous-Token Strength\n(attention to position i-1)", "YlGnBu"),
-    ("entropy", "Entropy\n(how spread out is attention)", "viridis"),
+panels = [
+    ("sink", "How much attention goes\nto the first token?", "Sink Strength", "YlOrRd"),
+    (
+        "prev_token",
+        "How much attention goes\nto the previous token?",
+        "Previous-Token Strength",
+        "YlGnBu",
+    ),
+    ("entropy", "How spread out\nis the attention?", "Entropy (bits)", "cividis"),
 ]
 
-for ax, (metric, title, cmap) in zip(axes, metrics):
+for ax, (metric, subtitle, label, cmap) in zip(axes, panels):
     data = summary[metric]
-    im = ax.imshow(data, cmap=cmap, aspect="auto")
-    ax.set_xlabel("Head")
-    ax.set_ylabel("Layer")
-    ax.set_title(title, fontsize=10)
+    im = ax.imshow(data, cmap=cmap, aspect="auto", interpolation="nearest")
+    ax.set_xlabel("Head Index", fontsize=10)
+    ax.set_ylabel("Layer", fontsize=10)
     ax.set_xticks(range(0, n_heads, 2))
     ax.set_yticks(range(0, n_layers, 4))
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    ax.set_title(f"{label}\n{subtitle}", fontsize=10, linespacing=1.4)
+    cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cb.ax.tick_params(labelsize=8)
 
-fig.suptitle("The Attention Landscape: 448 Heads at a Glance", fontsize=13, y=1.02)
+fig.suptitle(
+    "448 Attention Heads at a Glance",
+    fontsize=14,
+    fontweight="bold",
+    y=1.01,
+)
 fig.tight_layout()
 show(fig, filename="02-attention-landscape.png")
 
 # %% [markdown]
-# What do you notice?
+# **What to notice:**
 #
-# - **Sink strength** (left): Many heads across all layers show moderate-to-high
-#   sink behavior (warm colors). This is the "attention sink" phenomenon, documented
-#   in research from Xiao et al. (2023). The first token acts as a safe dumping
-#   ground for attention when a head has nothing semantically useful to attend to.
+# - The **sink panel** (left) is warm almost everywhere — the majority of heads
+#   send significant attention to position 0. This is the "attention sink"
+#   phenomenon: the first token acts as a safe no-op target when a head has
+#   nothing semantically useful to attend to.
 #
-# - **Previous-token strength** (middle): A few heads in early layers light up
-#   strongly. These are the "previous-token heads" — they specialize in "what
-#   token came right before me?", feeding positional information forward.
+# - The **previous-token panel** (center) has a few bright spots, mostly in
+#   early layers. These are specialist heads that pass "what came before me"
+#   information forward — a building block of the induction circuit.
 #
-# - **Entropy** (right): Varies widely. Low-entropy heads are specialists
-#   (concentrated attention). High-entropy heads attend broadly.
+# - The **entropy panel** (right) varies widely. Low-entropy heads are
+#   specialists; high-entropy heads attend broadly across the context.
 
 # %% [markdown]
-# ## Part 4: Zooming In — Pattern Types
+# ---
+# ## 5. Zooming In — Three Pattern Types
 #
-# Let's look at individual heads to see these patterns up close. We will pick
-# one head of each type based on the metrics we just computed.
+# Let's find one head of each type and look at the full attention matrix
+# with token labels.
 
 # %%
-# Find the strongest sink head, previous-token head, and a high-entropy head
 sink_scores = summary["sink"]
 prev_scores = summary["prev_token"]
 entropy_scores = summary["entropy"]
 
-# Best of each type
 sink_layer, sink_head = np.unravel_index(np.argmax(sink_scores), sink_scores.shape)
 prev_layer, prev_head = np.unravel_index(np.argmax(prev_scores), prev_scores.shape)
 entropy_layer, entropy_head = np.unravel_index(np.argmax(entropy_scores), entropy_scores.shape)
 
-console.print(
-    f"\n[bold]Strongest sink head:[/bold] Layer {sink_layer}, Head {sink_head}"
-    f" (score: {sink_scores[sink_layer, sink_head]:.3f})"
-)
-console.print(
-    f"[bold]Strongest previous-token head:[/bold] Layer {prev_layer}, Head {prev_head}"
-    f" (score: {prev_scores[prev_layer, prev_head]:.3f})"
-)
-console.print(
-    f"[bold]Highest entropy head:[/bold] Layer {entropy_layer}, Head {entropy_head}"
-    f" (entropy: {entropy_scores[entropy_layer, entropy_head]:.3f})"
-)
-
 # %%
-# Plot these three heads side by side
-fig, axes = plt.subplots(1, 3, figsize=(20, 6))
+fig, axes = plt.subplots(1, 3, figsize=(22, 7))
 
-heads_to_show = [
-    (sink_layer, sink_head, "Sink Head"),
-    (prev_layer, prev_head, "Previous-Token Head"),
-    (entropy_layer, entropy_head, "High-Entropy Head"),
+examples = [
+    (
+        sink_layer,
+        sink_head,
+        f"Sink Head  (Layer {sink_layer}, Head {sink_head})",
+        "Notice the bright column on the left —\nevery token attends to the first position.",
+        "magma",
+    ),
+    (
+        prev_layer,
+        prev_head,
+        f"Previous-Token Head  (Layer {prev_layer}, Head {prev_head})",
+        "Bright diagonal one step below center —\neach token looks at the one before it.",
+        "magma",
+    ),
+    (
+        entropy_layer,
+        entropy_head,
+        f"Broad-Context Head  (Layer {entropy_layer}, Head {entropy_head})",
+        "Attention is spread broadly — no single\nposition dominates.",
+        "magma",
+    ),
 ]
 
-for ax, (layer, head, label) in zip(axes, heads_to_show):
+for ax, (layer, head, title, annotation, cmap) in zip(axes, examples):
     plot_attention_head(
         weights[layer][head],
         tokens,
-        title=f"{label}\nLayer {layer}, Head {head}",
+        title=title,
         ax=ax,
-        cmap="viridis",
-        show_values=len(tokens) <= 15,
+        cmap=cmap,
+        show_values=seq_len <= 15,
+    )
+    # Add annotation below
+    ax.text(
+        0.5,
+        -0.22,
+        annotation,
+        transform=ax.transAxes,
+        fontsize=9,
+        ha="center",
+        va="top",
+        style="italic",
+        color="#3a4160",
     )
 
-fig.suptitle("Three Types of Attention Heads", fontsize=13, y=1.02)
-fig.tight_layout()
+fig.suptitle(
+    "Three Types of Attention Heads",
+    fontsize=14,
+    fontweight="bold",
+    y=1.02,
+)
+fig.tight_layout(rect=[0, 0.05, 1, 0.98])
 show(fig, filename="02-attention-head-types.png")
 
 # %% [markdown]
-# **Reading these heatmaps:**
-# - Each row is a **query** position (the token doing the looking)
-# - Each column is a **key** position (the token being looked at)
-# - Brighter = more attention weight
+# **How to read these heatmaps:**
+# - **Rows** = query tokens (the one doing the looking)
+# - **Columns** = key tokens (the one being looked at)
+# - **Brighter** = more attention weight (higher probability in the softmax)
 #
-# In the **sink head**, you see a bright vertical column on the left — every
-# token sends attention to position 0 regardless of content.
-#
-# In the **previous-token head**, you see a bright diagonal stripe one step
-# below the main diagonal — each token attends most strongly to the token
-# right before it.
-#
-# In the **high-entropy head**, attention is spread more broadly — no single
-# position dominates.
+# The causal mask means a token can only attend to earlier positions, which
+# is why the upper-right triangle is dark.
 
 # %% [markdown]
-# ## Part 5: GQA Pairs — Shared Keys, Different Queries
+# ---
+# ## 6. GQA in Action — Paired Heads
 #
-# Because Qwen3-0.6B uses Grouped Query Attention, heads 0 and 1 share the
-# same key and value projections, just with different query projections.
-# Let's see if paired heads actually look similar.
+# In Grouped Query Attention, every two query heads share the same key and
+# value projections. Let's place paired heads side by side to see if that
+# sharing shows up visually.
 
 # %%
-# Pick a layer with interesting patterns (use the sink layer)
-pair_layer = sink_layer
-fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+pair_layer = prev_layer  # use a layer with interesting patterns
+fig, axes = plt.subplots(2, 4, figsize=(22, 10))
 
 for col in range(4):
-    head_a = col * 2  # Even head
-    head_b = col * 2 + 1  # Odd head (shares KV with head_a)
+    head_a = col * 2
+    head_b = col * 2 + 1
 
     plot_attention_head(
         weights[pair_layer][head_a],
         tokens,
-        title=f"Head {head_a} (KV group {col})",
+        title=f"Head {head_a}",
         ax=axes[0, col],
-        cmap="viridis",
+        cmap="magma",
     )
     plot_attention_head(
         weights[pair_layer][head_b],
         tokens,
-        title=f"Head {head_b} (KV group {col})",
+        title=f"Head {head_b}",
         ax=axes[1, col],
-        cmap="viridis",
+        cmap="magma",
+    )
+    # Group label
+    axes[0, col].text(
+        0.5,
+        1.18,
+        f"KV Group {col}",
+        transform=axes[0, col].transAxes,
+        fontsize=9,
+        ha="center",
+        fontweight="bold",
+        color="#4a7c74",
     )
 
 fig.suptitle(
-    f"GQA Pairs in Layer {pair_layer}: Same Keys, Different Queries",
-    fontsize=13,
-    y=1.02,
+    f"GQA Pairs in Layer {pair_layer} — Same Keys & Values, Different Queries",
+    fontsize=14,
+    fontweight="bold",
+    y=1.04,
 )
 fig.tight_layout()
 show(fig, filename="02-gqa-pairs.png")
 
 # %% [markdown]
-# Notice how paired heads (top and bottom in each column) share structural
-# similarities — they attend to similar positions because they use the same
-# keys and values — but the exact weights differ because each head has its
-# own query projection.
-#
-# This is the GQA trade-off: you save memory and compute by sharing KV heads
-# (8 instead of 16), but each query head can still specialize through its
-# unique query projection.
+# Each column is one KV group. The top and bottom heads share keys and values,
+# but their queries differ — so the patterns are **similar but not identical**.
+# That is the GQA trade-off: fewer KV heads saves memory, but each query head
+# still gets its own perspective.
 
 # %% [markdown]
-# ## Part 6: The Grid View
+# ---
+# ## 7. Layer-by-Layer Evolution
 #
-# Let's see a sample of heads across layers to watch how attention patterns
-# evolve from early to late layers.
+# How do attention patterns change as we go deeper into the model?
 
 # %%
-# Show 5 representative layers
-fig = plot_head_grid(weights, tokens, layers=[0, 6, 13, 20, 27])
+fig = plot_head_grid(
+    weights,
+    tokens,
+    layers=[0, 6, 13, 20, 27],
+    cmap="magma",
+    figsize_per_head=1.3,
+)
+fig.suptitle(
+    "How Attention Evolves from Layer 0 to Layer 27",
+    fontsize=13,
+    fontweight="bold",
+    y=1.02,
+)
 show(fig, filename="02-attention-grid.png")
 
 # %% [markdown]
-# Early layers (top rows) tend to show simpler patterns — positional attention,
-# previous-token attention, or sinks. Deeper layers (bottom rows) show more
-# content-dependent patterns that are harder to interpret but capture semantic
-# relationships.
+# - **Early layers** (top): simpler patterns — positional, previous-token, sinks
+# - **Middle layers**: increasingly content-dependent
+# - **Late layers** (bottom): complex, harder to interpret — these capture
+#   semantic relationships that earlier layers built up
 
 # %% [markdown]
-# ## Part 7: Pattern Census
+# ---
+# ## 8. Head Census — Classifying All 448 Heads
 #
-# Let's classify every head and see how the 448 heads break down by type.
+# Let's automatically classify every head and map them.
 
 # %%
 classifications = summary["classification"]
 
-# Count each type
 from collections import Counter
 
 type_counts = Counter(classifications.flatten())
 
-table = Table(title="Attention Head Census (448 heads)")
-table.add_column("Pattern Type", style="bold")
+table = Table(title="Attention Head Census")
+table.add_column("Pattern", style="bold")
 table.add_column("Count", justify="right")
 table.add_column("Fraction", justify="right")
+table.add_column("Description")
 
-for pattern_type, count in sorted(type_counts.items(), key=lambda x: -x[1]):
-    table.add_row(pattern_type, str(count), f"{count / (n_layers * n_heads):.1%}")
+descriptions = {
+    "sink": "Attends primarily to the first token",
+    "previous_token": "Attends to the immediately preceding token",
+    "self": "Attends primarily to the current token",
+    "uniform": "Spreads attention broadly across all positions",
+    "mixed": "No single dominant pattern",
+}
 
+for ptype, count in sorted(type_counts.items(), key=lambda x: -x[1]):
+    frac = count / (n_layers * n_heads)
+    table.add_row(
+        ptype,
+        str(count),
+        f"{frac:.1%}",
+        descriptions.get(ptype, ""),
+    )
 console.print(table)
 
-# Show classification map
-fig, ax = plt.subplots(figsize=(12, 8))
-type_to_num = {"sink": 0, "previous_token": 1, "self": 2, "uniform": 3, "mixed": 4}
+# %%
+# Visual classification map
+fig, ax = plt.subplots(figsize=(14, 8))
+
+type_to_num = {
+    "sink": 0,
+    "previous_token": 1,
+    "self": 2,
+    "uniform": 3,
+    "mixed": 4,
+}
+colors = ["#b87333", "#4a7c74", "#5a7a3d", "#6b7091", "#d4c8a8"]
 class_numeric = np.vectorize(lambda x: type_to_num.get(x, 4))(classifications)
 
 from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
-cmap = ListedColormap(["#b87333", "#4a7c74", "#5a7a3d", "#6b7091", "#d4c8a8"])
-im = ax.imshow(class_numeric, cmap=cmap, aspect="auto")
-ax.set_xlabel("Head")
-ax.set_ylabel("Layer")
-ax.set_title("Attention Head Classification Map")
+cmap_class = ListedColormap(colors)
+ax.imshow(class_numeric, cmap=cmap_class, aspect="auto", interpolation="nearest")
+ax.set_xlabel("Head Index", fontsize=11)
+ax.set_ylabel("Layer", fontsize=11)
+ax.set_title(
+    "Classification Map — Every Head, Every Layer",
+    fontsize=13,
+    fontweight="bold",
+)
 ax.set_xticks(range(n_heads))
 ax.set_yticks(range(0, n_layers, 2))
 
-# Legend
-from matplotlib.patches import Patch
-
-legend_elements = [
-    Patch(facecolor="#b87333", label="Sink"),
-    Patch(facecolor="#4a7c74", label="Previous-token"),
-    Patch(facecolor="#5a7a3d", label="Self-attention"),
-    Patch(facecolor="#6b7091", label="Uniform"),
-    Patch(facecolor="#d4c8a8", label="Mixed"),
+legend_items = [
+    Patch(facecolor=c, edgecolor="#3a4160", linewidth=0.5, label=name.replace("_", " ").title())
+    for name, c in zip(type_to_num.keys(), colors)
 ]
-ax.legend(handles=legend_elements, loc="upper right", framealpha=0.9)
+ax.legend(
+    handles=legend_items,
+    loc="upper right",
+    framealpha=0.95,
+    fontsize=9,
+    title="Pattern Type",
+)
 fig.tight_layout()
 show(fig, filename="02-head-classification-map.png")
 
 # %% [markdown]
-# ## Part 8: Head Ablation — Which Heads Matter?
+# ---
+# ## 9. Ablation — Which Heads Actually Matter?
 #
-# Now the question that connects theory to practice: if we zero out a single
-# head, how much does the model's performance change?
+# This is the experiment that connects everything. We will:
+# 1. Measure the model's baseline perplexity (how well it predicts text)
+# 2. Zero out each head, one at a time, and re-measure
+# 3. Record how much perplexity changes
 #
-# We will measure perplexity — how surprised the model is by a set of sentences.
-# Lower perplexity means better predictions. If ablating a head raises perplexity
-# sharply, that head is load-bearing. If it barely changes, the head is redundant.
+# A head that raises perplexity sharply when removed is **load-bearing**.
+# A head that barely moves the needle is **redundant**.
 
 # %%
-# Evaluation sentences for perplexity
 EVAL_TEXTS = [
     "The research team published their findings in a prestigious journal last month.",
-    "Small language models are increasingly used in edge computing applications.",
-    "The attention mechanism allows each token to gather information from other positions.",
-    "Training on high quality data often matters more than training on more data.",
+    "Small language models are increasingly deployed on mobile devices and edge hardware.",
+    "Attention allows each token to gather relevant context from earlier positions.",
+    "Training on curated high quality data often matters more than sheer dataset size.",
     "The capital of France is Paris and the capital of Japan is Tokyo.",
 ]
 
-# Compute baseline perplexity (no ablation)
-print("Computing baseline perplexity...")
+print("Measuring baseline perplexity...")
 baseline_ppl = compute_perplexity(model, tokenizer, EVAL_TEXTS, device=device)
-console.print(f"\n[bold]Baseline perplexity:[/bold] {baseline_ppl:.2f}")
+console.print(f"\n  Baseline perplexity: [bold]{baseline_ppl:.2f}[/bold]")
 
 # %%
-# Ablate each head and measure the impact
-# For time: ablate every head in a subset of layers, or all heads if fast enough
-N_LAYERS_TO_ABLATE = n_layers if not is_ci() else 4  # Reduce in CI
+N_LAYERS_TO_ABLATE = n_layers if not is_ci() else 4
 layers_to_ablate = list(range(N_LAYERS_TO_ABLATE))
+HEAD_DIM = 128
 
-HEAD_DIM = 128  # Qwen3-0.6B head dimension
-
-print(
-    f"\nAblating {N_LAYERS_TO_ABLATE} layers x {n_heads} heads"
-    f" = {N_LAYERS_TO_ABLATE * n_heads} experiments..."
+console.print(
+    f"\n  Running {N_LAYERS_TO_ABLATE * n_heads} ablation experiments"
+    f" ({N_LAYERS_TO_ABLATE} layers × {n_heads} heads)..."
 )
 
-ablation_results = np.zeros((N_LAYERS_TO_ABLATE, n_heads))
+ablation_delta = np.zeros((N_LAYERS_TO_ABLATE, n_heads))
 
 from tqdm import tqdm
 
-for i, layer_idx in enumerate(tqdm(layers_to_ablate, desc="Ablating layers")):
+for i, layer_idx in enumerate(tqdm(layers_to_ablate, desc="Ablating")):
     for head_idx in range(n_heads):
         with ablate_head(model, layer_idx, head_idx, head_dim=HEAD_DIM):
             ppl = compute_perplexity(model, tokenizer, EVAL_TEXTS, device=device)
-        ablation_results[i, head_idx] = ppl - baseline_ppl
+        ablation_delta[i, head_idx] = ppl - baseline_ppl
 
 # %%
-# Visualize the ablation impact
-fig, ax = plt.subplots(figsize=(14, max(6, N_LAYERS_TO_ABLATE * 0.3)))
+# --- Ablation heatmap ---
+fig, ax = plt.subplots(figsize=(16, max(7, N_LAYERS_TO_ABLATE * 0.3)))
+
+# Use a log-ish scale to show both small and large effects
+vmax = max(2.0, float(np.percentile(np.abs(ablation_delta), 97)))
 im = ax.imshow(
-    ablation_results,
+    ablation_delta,
     cmap="RdYlGn_r",
     aspect="auto",
-    vmin=0,
-    vmax=max(1.0, np.percentile(ablation_results, 95)),
+    vmin=-vmax * 0.1,
+    vmax=vmax,
+    interpolation="nearest",
 )
-ax.set_xlabel("Head")
-ax.set_ylabel("Layer")
-ax.set_title("Ablation Impact: Perplexity Increase When Head Is Zeroed")
+ax.set_xlabel("Head Index", fontsize=11)
+ax.set_ylabel("Layer", fontsize=11)
+ax.set_title(
+    "Ablation Impact — Perplexity Change When Each Head Is Zeroed",
+    fontsize=13,
+    fontweight="bold",
+    pad=12,
+)
 ax.set_xticks(range(n_heads))
 ax.set_yticks(range(N_LAYERS_TO_ABLATE))
 ax.set_yticklabels([str(idx) for idx in layers_to_ablate])
-plt.colorbar(im, ax=ax, label="Perplexity increase (higher = more important)")
-fig.tight_layout()
-show(fig, filename="02-ablation-impact.png")
+cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+cb.set_label("Perplexity change  (red = important, green = negligible)", fontsize=9)
 
-# %%
-# Find the most and least important heads
-top_k = 5
-flat_results = [
-    (layers_to_ablate[i], j, ablation_results[i, j])
+# Mark the top-3 most important heads with stars
+flat = [
+    (layers_to_ablate[i], j, ablation_delta[i, j])
     for i in range(N_LAYERS_TO_ABLATE)
     for j in range(n_heads)
 ]
-flat_results.sort(key=lambda x: -x[2])
+flat.sort(key=lambda x: -x[2])
+for rank, (layer, head, delta) in enumerate(flat[:3]):
+    row_idx = layers_to_ablate.index(layer)
+    ax.plot(
+        head,
+        row_idx,
+        marker="*",
+        color="white",
+        markersize=14,
+        markeredgecolor="#1a1f3a",
+        markeredgewidth=1.0,
+    )
 
-table = Table(title=f"Top {top_k} Most Important Heads (highest perplexity increase)")
+fig.tight_layout()
+show(fig, filename="02-ablation-impact.png")
+
+# %% [markdown]
+# The white stars mark the three most important heads. Notice how they cluster
+# in early layers — these are likely part of the **induction circuit**, the
+# fundamental mechanism for in-context learning.
+
+# %%
+# --- Results table ---
+top_k = 5
+
+table = Table(title="Most Important Heads (largest perplexity increase)")
+table.add_column("Rank", justify="center", style="bold")
 table.add_column("Layer", justify="right")
 table.add_column("Head", justify="right")
 table.add_column("PPL Change", justify="right")
-for layer, head, delta in flat_results[:top_k]:
-    table.add_row(str(layer), str(head), f"+{delta:.3f}")
-console.print(table)
+table.add_column("Verdict")
 
-table = Table(title=f"Top {top_k} Least Important Heads (smallest perplexity change)")
-table.add_column("Layer", justify="right")
-table.add_column("Head", justify="right")
-table.add_column("PPL Change", justify="right")
-for layer, head, delta in flat_results[-top_k:]:
-    sign = "+" if delta >= 0 else ""
-    table.add_row(str(layer), str(head), f"{sign}{delta:.3f}")
+for rank, (layer, head, delta) in enumerate(flat[:top_k], 1):
+    severity = "[red bold]critical[/]" if delta > 10 else "[yellow]notable[/]"
+    table.add_row(
+        str(rank),
+        str(layer),
+        str(head),
+        f"+{delta:.1f}",
+        severity,
+    )
 console.print(table)
 
 # %%
-# How many heads can you remove with minimal damage?
-threshold = 0.1  # Less than 0.1 PPL increase is negligible
-negligible = sum(1 for _, _, d in flat_results if d < threshold)
+# --- Summary statistic ---
+threshold = 0.1
+negligible = sum(1 for _, _, d in flat if abs(d) < threshold)
+total = N_LAYERS_TO_ABLATE * n_heads
+pct = negligible / total
+
 console.print(
-    f"\n[bold]{negligible} of {N_LAYERS_TO_ABLATE * n_heads} heads[/bold] "
-    f"({negligible / (N_LAYERS_TO_ABLATE * n_heads):.0%}) cause less than "
-    f"{threshold} perplexity increase when ablated."
+    f"\n  [bold]{negligible}[/bold] of {total} heads"
+    f" ([bold]{pct:.0%}[/bold]) cause less than"
+    f" {threshold} perplexity change when removed."
 )
-console.print("This is the empirical basis for head pruning: most heads are redundant.")
+console.print("  This is why head pruning works: most heads are redundant.\n")
 
 # %% [markdown]
-# ## Key Takeaways
+# ---
+# ## 10. Interactive Attention Explorer
 #
-# **What you measured:**
+# For a richer view, here is an interactive heatmap you can hover over.
+# (In script mode this saves as an HTML file you can open in a browser.)
+
+# %%
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# Show the 3 most important heads interactively
+fig_interactive = make_subplots(
+    rows=1,
+    cols=3,
+    subplot_titles=[
+        f"Layer {flat[i][0]}, Head {flat[i][1]} (+{flat[i][2]:.1f} PPL)" for i in range(3)
+    ],
+    horizontal_spacing=0.08,
+)
+
+for col_idx in range(3):
+    layer, head, delta = flat[col_idx]
+    mat = weights[layer][head]
+    fig_interactive.add_trace(
+        go.Heatmap(
+            z=mat,
+            x=tokens,
+            y=tokens,
+            colorscale="Magma",
+            zmin=0,
+            text=[[f"{v:.3f}" for v in row] for row in mat],
+            hovertemplate=("Query: %{y}<br>Key: %{x}<br>Weight: %{text}<extra></extra>"),
+            showscale=col_idx == 2,
+        ),
+        row=1,
+        col=col_idx + 1,
+    )
+    fig_interactive.update_xaxes(
+        tickangle=45,
+        tickfont_size=9,
+        row=1,
+        col=col_idx + 1,
+    )
+    fig_interactive.update_yaxes(
+        tickfont_size=9,
+        row=1,
+        col=col_idx + 1,
+    )
+
+fig_interactive.update_layout(
+    title_text="Interactive: Three Most Important Attention Heads",
+    title_font_size=15,
+    width=1100,
+    height=450,
+    template="plotly_white",
+)
+
+from microscale.env import is_notebook as _is_nb
+
+if _is_nb():
+    fig_interactive.show()
+else:
+    from microscale.viz import _output_dir
+
+    path = _output_dir() / "02-attention-interactive.html"
+    fig_interactive.write_html(str(path), include_plotlyjs=True)
+    console.print(f"  [dim]Interactive explorer saved:[/dim] {path}")
+
+# %% [markdown]
+# ---
+# ## What You Learned
 #
-# 1. **Attention sinks are real.** Many heads across all layers send attention
-#    to the first token, regardless of content. This is a learned "no-op" —
-#    when a head has nothing useful to attend to, the first token acts as a
-#    safe default. (Xiao et al., 2023)
+# | Finding | Evidence |
+# |---|---|
+# | Attention sinks are real | Most heads attend to position 0 |
+# | Previous-token heads are early | A few early heads specialize in "look back" |
+# | GQA pairs share structure | Paired heads are similar, not identical |
+# | Most heads are redundant | Over half cause < 0.1 PPL change |
+# | A few heads are critical | 2–3 early heads cause massive PPL increase |
 #
-# 2. **Previous-token heads concentrate in early layers.** These heads implement
-#    a simple "look at what came before me" pattern. They provide positional
-#    information that later layers build on — a key component of the induction
-#    circuit described by Olsson et al. (2022).
+# ### Artifacts in `outputs/`
 #
-# 3. **GQA pairs share structure.** Heads that share key-value projections produce
-#    similar but not identical patterns. The query projection gives each head
-#    room to specialize, even with shared KV.
+# | File | What it shows |
+# |------|---------------|
+# | `02-attention-landscape.png` | 448-head overview: sink, previous-token, entropy |
+# | `02-attention-head-types.png` | Annotated examples of three pattern types |
+# | `02-gqa-pairs.png` | GQA paired heads side by side |
+# | `02-attention-grid.png` | Layer-by-layer pattern evolution |
+# | `02-head-classification-map.png` | Color-coded map of every head's type |
+# | `02-ablation-impact.png` | Which heads matter (with star markers) |
+# | `02-attention-interactive.html` | Hoverable Plotly explorer for top heads |
 #
-# 4. **Most heads are dispensable.** Ablating the majority of heads causes
-#    negligible perplexity increase. A few critical heads carry most of the
-#    model's function. This is why structured pruning works — you can remove
-#    heads and save compute without meaningful quality loss.
-#
-# ## Artifacts
-#
-# Check your `outputs/` directory for:
-# - `02-attention-landscape.png` — three-panel overview of all 448 heads
-# - `02-attention-head-types.png` — examples of sink, previous-token, and broad heads
-# - `02-gqa-pairs.png` — GQA paired heads showing shared structure
-# - `02-attention-grid.png` — layer-by-layer evolution of attention patterns
-# - `02-head-classification-map.png` — pattern type for every head
-# - `02-ablation-impact.png` — which heads matter most
-#
-# ## References
+# ### References
 #
 # - Olsson et al., "In-context Learning and Induction Heads" (2022)
 # - Elhage et al., "A Mathematical Framework for Transformer Circuits" (2021)
