@@ -37,7 +37,14 @@ try:
     import microscale
 except ImportError:
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-q", "git+https://github.com/user/Microscale.git"]
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "git+https://github.com/microscale-academy/labs.git",
+        ]
     )
 
 from microscale import apply_style, device_summary, show

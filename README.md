@@ -8,12 +8,12 @@ Every lab produces a number you can't get from prose. Every lab runs on consumer
 
 **Option A: Colab (zero setup)**
 
-Click the Colab badge on any lab below.
+Open any lab's generated notebook in `notebooks/` directly in Colab — no local setup needed.
 
 **Option B: Local with uv (recommended)**
 
 ```bash
-git clone https://github.com/user/Microscale.git
+git clone https://github.com/microscale-academy/labs.git
 cd Microscale
 
 # Auto-detect your platform (Mac/GPU/CPU) and install:
@@ -28,7 +28,7 @@ just setup-cuda126  # Linux + NVIDIA GPU (CUDA 12.6, newer drivers)
 **Option C: Local with pip**
 
 ```bash
-git clone https://github.com/user/Microscale.git
+git clone https://github.com/microscale-academy/labs.git
 cd Microscale
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[cpu,dev,notebooks]"   # Mac / CPU
