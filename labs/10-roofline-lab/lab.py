@@ -214,20 +214,62 @@ console.print(table)
 # ---
 # ## 5. Where Does LLM Inference Sit?
 #
+# The roofline tells us the hardware limits. To predict tokens/sec for
+# a specific model, we need its **parameter count** and **weight format**.
+#
 # For a model with P parameters stored in `b_w` bytes per weight:
 #
-# | Scenario | FLOPs | Bytes Read | Arithmetic Intensity |
-# |----------|-------|-----------|---------------------|
-# | Batch=1 decode (fp16) | 2P | 2P | **1.0 FLOP/byte** |
-# | Batch=1 decode (4-bit) | 2P | 0.5P | **4.0 FLOP/byte** |
-# | Batch=B decode (fp16) | 2PB | 2P | **B FLOP/byte** |
+# - **FLOPs per token** ≈ 2P (each weight is multiplied once per token)
+# - **Bytes read per token** ≈ P × b_w (all weights must be read from memory)
+# - **Arithmetic Intensity** = 2P / (P × b_w) = 2 / b_w
 #
-# At batch=1 with fp16 weights, AI = 1.0 — deep in the bandwidth-bound
-# region (ridge point is typically 10-50).
+# | Scenario | AI (FLOP/byte) | Why |
+# |----------|----------------|-----|
+# | FP16, batch=1 | 2/2 = **1.0** | 2 bytes per weight |
+# | 4-bit, batch=1 | 2/0.5 = **4.0** | 0.5 bytes per weight |
+# | FP16, batch=B | **B** | Weights read once, used B times |
+#
+# Let's compute this for several models you've seen in these labs.
 
 # %%
-# Model operating points
-model_params = 596e6  # Qwen3-0.6B
+# Models we've worked with across the labs
+MODELS_TO_PROFILE = {
+    "Qwen3-0.6B": 596e6,
+    "SmolLM2-360M": 362e6,
+    "SmolLM3-3B": 3.08e9,
+    "Phi-4-mini (3.8B)": 3.84e9,
+    "Llama-3.2-3B": 3.21e9,
+}
+
+console.print("\n[bold]Theoretical Throughput on Your Hardware[/bold]\n")
+
+for model_name, params in MODELS_TO_PROFILE.items():
+    # FP16, batch=1: AI = 1.0
+    fp16_bw_perf = bw_gb_s * 1e9 * 1.0  # FLOP/s
+    fp16_tok_s = fp16_bw_perf / (2 * params)
+
+    # 4-bit, batch=1: AI = 4.0
+    q4_bw_perf = bw_gb_s * 1e9 * 4.0
+    q4_tok_s = min(q4_bw_perf, compute_tflops * 1e12) / (2 * params)
+
+    console.print(
+        f"  {model_name:22s}  "
+        f"FP16: [bold]{fp16_tok_s:>6.0f}[/bold] tok/s   "
+        f"4-bit: [bold]{q4_tok_s:>6.0f}[/bold] tok/s"
+    )
+
+# %% [markdown]
+# These numbers are **theoretical maximums** — real frameworks add
+# overhead from KV cache, attention computation, kernel launch latency,
+# and memory management. Expect actual throughput to be 60-80% of these
+# predictions for well-optimized runtimes like llama.cpp or MLX.
+
+# %%
+# Detailed operating points for one model
+model_name = "Qwen3-0.6B"
+model_params = MODELS_TO_PROFILE[model_name]
+
+console.print(f"\n[bold]Detailed Analysis: {model_name}[/bold]\n")
 
 operating_points = [
     ("Batch=1, FP16", 1.0, "#8b3a3a"),
@@ -237,10 +279,9 @@ operating_points = [
     ("Batch=64, FP16", 64.0, "#1a1f3a"),
 ]
 
-# Compute expected performance at each operating point
 for name, ai, color in operating_points:
-    bw_limited = bw_gb_s * 1e9 * ai  # FLOP/s
-    compute_limited = compute_tflops * 1e12  # FLOP/s
+    bw_limited = bw_gb_s * 1e9 * ai
+    compute_limited = compute_tflops * 1e12
     actual = min(bw_limited, compute_limited)
     regime = "bandwidth-bound" if ai < ridge_point else "compute-bound"
     tok_per_sec = actual / (2 * model_params)
@@ -319,7 +360,7 @@ for name, ai, color in operating_points:
 ax.set_xlabel("Arithmetic Intensity (FLOP/byte)", fontsize=12)
 ax.set_ylabel("Performance (GFLOP/s)", fontsize=12)
 ax.set_title(
-    f"Roofline Model — Your {device.type.upper()} GPU\n"
+    f"Roofline Model — Your {device.type.upper()} GPU  ({model_name})\n"
     f"BW: {bw_gb_s:.0f} GB/s  |  Compute: {compute_tflops:.1f} TFLOPS",
     fontsize=13,
     fontweight="bold",
@@ -373,10 +414,13 @@ show(fig, filename="10-roofline-chart.png")
 # ---
 # ## 7. Practical Implications
 #
-# Let's compute expected tokens/second for Qwen3-0.6B on your hardware.
+# Let's compute expected tokens/second for each model across different
+# configurations on your hardware. These are theoretical maximums —
+# actual frameworks achieve 60-80% of these.
 
 # %%
-table = Table(title=f"Expected Throughput — Qwen3-0.6B on {device.type.upper()}")
+title = f"Expected Throughput — {model_name} on {device.type.upper()}"
+table = Table(title=title)
 table.add_column("Config", style="bold")
 table.add_column("AI (FLOP/byte)", justify="right")
 table.add_column("Regime")
