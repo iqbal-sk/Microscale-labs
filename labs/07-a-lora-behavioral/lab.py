@@ -79,7 +79,6 @@ device = get_torch_device()
 print(device_summary())
 
 # %%
-import json
 import os
 import time
 
@@ -193,11 +192,13 @@ console.print(
 # end of the lab.
 
 # %%
+# Behavioral test prompts — natural cooking questions, not tool calls.
+# These are NOT in the training set, so we test generalization.
 TEST_PROMPTS = [
     "How do I make garlic bread?",
-    "Convert 250ml of milk to cups",
-    "What can I cook with mushrooms and pasta?",
     "How do I know when bread is done baking?",
+    "What is the best way to store fresh herbs?",
+    "How do I fix salty soup?",
 ]
 
 
@@ -267,11 +268,9 @@ console.print(f"  Compression: {n_base / trainable:.0f}x fewer trainable params"
 # ---
 # ## 6. Prepare Training Data
 #
-# We build a small dataset of 100 examples in the **cooking domain**:
-# - 50 instruction-following (recipe questions and answers)
-# - 50 tool-calling (structured function calls for kitchen tasks)
-#
-# Each example is formatted using Qwen3's chat template.
+# We have **20 cooking instruction pairs** — natural-language questions
+# about cooking techniques with detailed, helpful answers. Each example
+# is formatted using Qwen3's chat template.
 
 # %%
 # Training data lives in data.py — 20 cooking instruction examples.
