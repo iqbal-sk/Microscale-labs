@@ -1,0 +1,48 @@
+# microscale/style.mplstyle
+# Microscale Lab Theme — field journal aesthetic
+
+# Figure
+figure.facecolor: "#f4ecd8"
+figure.edgecolor: "#e2d5b0"
+figure.figsize: 10, 6
+figure.dpi: 150
+
+# Axes
+axes.facecolor: "#faf5e8"
+axes.edgecolor: "#3a4160"
+axes.labelcolor: "#1a1f3a"
+axes.titlesize: 14
+axes.titleweight: bold
+axes.labelsize: 11
+axes.prop_cycle: cycler('color', ['#b87333', '#4a7c74', '#8b3a3a', '#5a7a3d', '#1a1f3a', '#d89050', '#2f5b54', '#6b7091'])
+axes.grid: True
+axes.grid.which: major
+
+# Grid
+grid.color: "#d4c8a8"
+grid.linewidth: 0.5
+grid.alpha: 0.7
+
+# Ticks
+xtick.color: "#3a4160"
+ytick.color: "#3a4160"
+xtick.labelsize: 9
+ytick.labelsize: 9
+
+# Legend
+legend.framealpha: 0.9
+legend.edgecolor: "#e2d5b0"
+legend.facecolor: "#f4ecd8"
+legend.fontsize: 10
+
+# Text
+text.color: "#1a1f3a"
+
+# Font
+font.family: serif
+font.size: 11
+
+# Savefig
+savefig.facecolor: "#f4ecd8"
+savefig.bbox: tight
+savefig.dpi: 150
