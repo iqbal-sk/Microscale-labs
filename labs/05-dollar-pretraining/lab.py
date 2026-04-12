@@ -169,6 +169,9 @@ raw_dataset = load_dataset("roneneldan/TinyStories", split=f"train[:{N_STORIES}]
 base_tokenizer = AutoTokenizer.from_pretrained("gpt2")
 if base_tokenizer.pad_token is None:
     base_tokenizer.pad_token = base_tokenizer.eos_token
+# We use GPT-2 tokenizer only for encoding, not for running GPT-2.
+# Suppress the "sequence length > 1024" warning — irrelevant here.
+base_tokenizer.model_max_length = 100000
 
 console.print(f"  Loaded {len(raw_dataset):,} stories")
 
