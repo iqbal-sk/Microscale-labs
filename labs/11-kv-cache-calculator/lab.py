@@ -286,7 +286,117 @@ show(fig, filename="11-kv-cache-growth.png")
 
 # %% [markdown]
 # ---
-# ## 5. The Batch Size Problem
+# ## 5. Predicted vs Actual — Load the Real Model
+#
+# The formula gives us a prediction. Let's load Qwen3-0.6B, run actual
+# inference at different sequence lengths, and measure the real KV cache
+# tensors to see how accurate our formula is.
+
+# %%
+import torch
+from transformers import AutoModelForCausalLM
+
+dev = torch.device(
+    "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+)
+
+print(f"Loading Qwen3-0.6B on {dev}...")
+kv_model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen3-0.6B",
+    dtype=torch.float16,
+).to(dev)
+kv_model.eval()
+
+# %%
+test_seq_lengths = [64, 256, 512, 1024, 2048]
+predicted_mb = []
+actual_mb = []
+
+for seq_len in test_seq_lengths:
+    input_ids = torch.randint(0, 1000, (1, seq_len), device=dev)
+
+    with torch.no_grad():
+        outputs = kv_model(input_ids, use_cache=True)
+
+    # Measure actual KV cache from the DynamicCache object
+    pkv = outputs.past_key_values
+    actual_bytes = 0
+    for layer in pkv.layers:
+        actual_bytes += layer.keys.nelement() * layer.keys.element_size()
+        actual_bytes += layer.values.nelement() * layer.values.element_size()
+
+    # Our formula's prediction
+    pred_bytes = kv_cache_bytes(28, 8, 128, seq_len, 1, 2)
+
+    predicted_mb.append(pred_bytes / 1e6)
+    actual_mb.append(actual_bytes / 1e6)
+
+    console.print(
+        f"  seq={seq_len:5d}  "
+        f"predicted={pred_bytes / 1e6:7.1f} MB  "
+        f"actual={actual_bytes / 1e6:7.1f} MB  "
+        f"match={'[green]YES[/]' if pred_bytes == actual_bytes else '[red]NO[/]'}"
+    )
+
+# Show the first layer's cache shape for understanding
+layer0 = pkv.layers[0]
+console.print(
+    f"\n  Cache shape per layer: K={list(layer0.keys.shape)}  V={list(layer0.values.shape)}"
+)
+console.print(
+    f"  (batch={layer0.keys.shape[0]},"
+    f" kv_heads={layer0.keys.shape[1]},"
+    f" seq_len={layer0.keys.shape[2]},"
+    f" head_dim={layer0.keys.shape[3]})"
+)
+
+# %%
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(
+    test_seq_lengths,
+    predicted_mb,
+    "o--",
+    color="#b87333",
+    linewidth=2,
+    markersize=8,
+    label="Predicted (formula)",
+)
+ax.plot(
+    test_seq_lengths,
+    actual_mb,
+    "s-",
+    color="#4a7c74",
+    linewidth=2,
+    markersize=8,
+    label="Actual (measured)",
+)
+ax.set_xlabel("Sequence Length")
+ax.set_ylabel("KV Cache Size (MB)")
+ax.set_title(
+    "Predicted vs Actual KV Cache — Qwen3-0.6B",
+    fontsize=13,
+    fontweight="bold",
+)
+ax.legend(fontsize=11)
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+show(fig, filename="11-kv-predicted-vs-actual.png")
+
+# %% [markdown]
+# The formula matches the actual cache tensors exactly — no overhead,
+# no approximation. This is because the KV cache is simply a stack of
+# tensors with a known shape. The "overhead" in real serving comes from
+# memory fragmentation, CUDA context, attention score buffers, and
+# framework bookkeeping — not from the cache itself.
+
+# %%
+# Clean up to free memory before batch size analysis
+del kv_model, outputs, pkv
+torch.mps.empty_cache() if torch.backends.mps.is_available() else None
+
+# %% [markdown]
+# ---
+# ## 6. The Batch Size Problem
 #
 # For serving, the real constraint is **concurrent users**. Each user
 # needs their own KV cache. Let's see how batch size affects total
@@ -367,7 +477,7 @@ show(fig, filename="11-kv-cache-batch-scaling.png")
 
 # %% [markdown]
 # ---
-# ## 6. GQA Saves KV Memory
+# ## 7. GQA Saves KV Memory
 #
 # Grouped Query Attention reduces the KV cache by using fewer KV heads.
 # Let's quantify the savings.
@@ -417,7 +527,7 @@ console.print(table)
 
 # %% [markdown]
 # ---
-# ## 7. Quantized KV Cache
+# ## 8. Quantized KV Cache
 #
 # You can also quantize the KV cache itself (separate from weight
 # quantization). Using int8 instead of fp16 halves the cache size.
@@ -465,7 +575,7 @@ show(fig, filename="11-kv-cache-quantization.png")
 
 # %% [markdown]
 # ---
-# ## 8. Interactive Calculator
+# ## 9. Interactive Calculator
 #
 # Use this function to compute KV cache for any model config.
 
