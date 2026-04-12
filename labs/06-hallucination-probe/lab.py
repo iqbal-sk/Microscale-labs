@@ -101,13 +101,16 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads from .env in current dir or parent dirs
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+# Check common env var names for OpenRouter
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
+    "OPENROUTER_API_SECRET", ""
+)
 
 if not OPENROUTER_API_KEY:
     console.print(
-        "[bold red]No OPENROUTER_API_KEY found.[/]\n"
-        "  Option 1: Create a .env file with OPENROUTER_API_KEY=sk-or-...\n"
-        "  Option 2: export OPENROUTER_API_KEY='sk-or-...'\n"
+        "[bold red]No OpenRouter API key found.[/]\n"
+        "  Create a .env file in the project root with:\n"
+        "    OPENROUTER_API_KEY=sk-or-your-key-here\n"
         "  Get a free key at: https://openrouter.ai/keys"
     )
 
@@ -116,8 +119,11 @@ client = OpenAI(
     api_key=OPENROUTER_API_KEY,
 )
 
-# We test with a small, free model
-MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+# Small model — $0.05/M tokens, 50 questions costs ~$0.0001
+# Free-tier (:free suffix) models often hit rate limits, so we
+# use the paid tier which has much higher limits.
+# Change this to test other models.
+MODEL = "meta-llama/llama-3.2-3b-instruct"
 console.print(f"  Model: [bold]{MODEL}[/bold]")
 
 # %% [markdown]
@@ -235,28 +241,38 @@ console.print(
 # We use greedy decoding (temperature=0) for reproducible results. Each
 # response is limited to 30 tokens — enough for a short factual answer.
 #
-# Rate limiting: we add a 2-second delay between requests to stay within
-# free-tier limits.
+# Rate limiting: we add a delay between requests and retry on 429 errors
+# with exponential backoff.
 
 # %%
-RATE_LIMIT_DELAY = 2.0  # seconds between requests
+RATE_LIMIT_DELAY = 3.0  # seconds between requests
+MAX_RETRIES = 3
 
 
 def query_model(question: str, model: str = MODEL) -> str:
-    """Ask a factual question and return the model's response."""
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "Answer with just the fact. Be brief."},
-                {"role": "user", "content": question},
-            ],
-            max_tokens=30,
-            temperature=0,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"[ERROR: {e}]"
+    """Ask a factual question with retry logic for rate limits."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Answer with just the fact. Be brief."},
+                    {"role": "user", "content": question},
+                ],
+                max_tokens=30,
+                temperature=0,
+            )
+            content = response.choices[0].message.content
+            return content.strip() if content else "[EMPTY]"
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str:
+                wait = RATE_LIMIT_DELAY * (2**attempt)
+                console.print(f"    [dim]Rate limited, waiting {wait:.0f}s...[/dim]")
+                time.sleep(wait)
+                continue
+            return f"[ERROR: {e}]"
+    return "[ERROR: rate limit exceeded after retries]"
 
 
 def score_response(response: str, acceptable: list[str]) -> str:
