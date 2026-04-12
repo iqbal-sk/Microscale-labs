@@ -4,21 +4,57 @@ __version__ = "0.1.0"
 
 # Convenience re-exports so labs can do:
 #   from microscale import get_device, show, apply_style
-from microscale.device import get_device, get_torch_device, device_summary, DeviceInfo, Runtime
-from microscale.env import is_notebook, is_colab, is_ci, runtime_context
-from microscale.viz import apply_style, show, save_fig, heatmap, line_plot
-from microscale.models import get_model_info, list_models, load_tokenizer, load_model
-from microscale.cache import setup_cache, cache_status
+from microscale.attention import (
+    ablate_head,
+    classify_head,
+    compute_head_summary,
+    extract_attention,
+    plot_attention_head,
+    plot_attention_overview,
+    plot_head_grid,
+)
+from microscale.cache import cache_status, setup_cache
+from microscale.device import DeviceInfo, Runtime, device_summary, get_device, get_torch_device
+from microscale.env import is_ci, is_colab, is_notebook, runtime_context
+from microscale.metrics import compute_per_token_loss, compute_perplexity
+from microscale.models import get_model_info, list_models, load_model, load_tokenizer
+from microscale.viz import apply_style, heatmap, line_plot, save_fig, show
 
 __all__ = [
     # device
-    "get_device", "get_torch_device", "device_summary", "DeviceInfo", "Runtime",
+    "get_device",
+    "get_torch_device",
+    "device_summary",
+    "DeviceInfo",
+    "Runtime",
     # env
-    "is_notebook", "is_colab", "is_ci", "runtime_context",
+    "is_notebook",
+    "is_colab",
+    "is_ci",
+    "runtime_context",
     # viz
-    "apply_style", "show", "save_fig", "heatmap", "line_plot",
+    "apply_style",
+    "show",
+    "save_fig",
+    "heatmap",
+    "line_plot",
     # models
-    "get_model_info", "list_models", "load_tokenizer", "load_model",
+    "get_model_info",
+    "list_models",
+    "load_tokenizer",
+    "load_model",
     # cache
-    "setup_cache", "cache_status",
+    "setup_cache",
+    "cache_status",
+    # metrics
+    "compute_perplexity",
+    "compute_per_token_loss",
+    # attention
+    "extract_attention",
+    "compute_head_summary",
+    "classify_head",
+    "plot_attention_head",
+    "plot_attention_overview",
+    "plot_head_grid",
+    "ablate_head",
 ]
