@@ -151,7 +151,7 @@ def analyze_architecture(
     """Detect architecture details from tensor names and shapes."""
     anatomy = ModelAnatomy(repo=repo, tensors=tensors)
 
-    # Total parameters
+    # Total parameters (raw count, may include tied duplicates — corrected below)
     anatomy.total_params = sum(t.numel for t in tensors)
 
     # Detect number of layers
@@ -282,6 +282,11 @@ def analyze_architecture(
             anatomy.norm_params += n
         else:
             anatomy.other_params += n
+
+    # Correct total for tied embeddings: subtract the duplicate lm_head
+    if anatomy.has_tied_embeddings:
+        lm_head_params = sum(t.numel for t in tensors if "lm_head" in t.name)
+        anatomy.total_params -= lm_head_params
 
     return anatomy
 
