@@ -217,7 +217,10 @@ QUESTIONS = {
         {"q": "What is the longest river in Australia?", "answers": ["murray", "murray river"]},
         {"q": "In what year did the Ottoman Empire officially end?", "answers": ["1922"]},
         {"q": "What is the capital of Eritrea?", "answers": ["asmara"]},
-        {"q": "What is the melting point of gold in Celsius?", "answers": ["1064", "1063"]},
+        {
+            "q": "What is the melting point of gold in Celsius?",
+            "answers": ["1064", "1,064", "1063", "1,063"],
+        },
         {"q": "Who wrote 'The Wealth of Nations'?", "answers": ["adam smith", "smith"]},
         {"q": "How many bones are in the adult human body?", "answers": ["206"]},
         {"q": "What is the capital of Laos?", "answers": ["vientiane"]},
@@ -282,9 +285,11 @@ def score_response(response: str, acceptable: list[str]) -> str:
     """
     if response.startswith("[ERROR"):
         return "error"
-    resp_lower = response.lower().strip()
+    # Normalize: lowercase, strip punctuation/whitespace, remove commas
+    resp_normalized = response.lower().strip().replace(",", "")
     for alias in acceptable:
-        if alias.lower() in resp_lower:
+        alias_normalized = alias.lower().replace(",", "")
+        if alias_normalized in resp_normalized:
             return "correct"
     return "incorrect"
 
