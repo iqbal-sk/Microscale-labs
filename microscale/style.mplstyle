@@ -14,7 +14,7 @@ axes.labelcolor: "#1a1f3a"
 axes.titlesize: 14
 axes.titleweight: bold
 axes.labelsize: 11
-axes.prop_cycle: cycler('color', ['#b87333', '#4a7c74', '#8b3a3a', '#5a7a3d', '#1a1f3a', '#d89050', '#2f5b54', '#6b7091'])
+axes.prop_cycle: cycler(color=["#b87333", "#4a7c74", "#8b3a3a", "#5a7a3d", "#1a1f3a", "#d89050", "#2f5b54", "#6b7091"])
 axes.grid: True
 axes.grid.which: major
 

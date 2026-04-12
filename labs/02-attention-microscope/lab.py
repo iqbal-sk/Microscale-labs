@@ -98,7 +98,7 @@ print("Loading Qwen3-0.6B (this may take a minute on first run)...")
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
 model = AutoModelForCausalLM.from_pretrained(
     "Qwen/Qwen3-0.6B",
-    torch_dtype=torch.float32,  # float32 for stable attention extraction
+    dtype=torch.float32,  # float32 for stable attention extraction
     attn_implementation="eager",  # required for output_attentions=True
 ).to(device)
 model.eval()
@@ -459,17 +459,18 @@ flat_results.sort(key=lambda x: -x[2])
 table = Table(title=f"Top {top_k} Most Important Heads (highest perplexity increase)")
 table.add_column("Layer", justify="right")
 table.add_column("Head", justify="right")
-table.add_column("PPL Increase", justify="right")
+table.add_column("PPL Change", justify="right")
 for layer, head, delta in flat_results[:top_k]:
     table.add_row(str(layer), str(head), f"+{delta:.3f}")
 console.print(table)
 
-table = Table(title=f"Top {top_k} Least Important Heads (lowest perplexity increase)")
+table = Table(title=f"Top {top_k} Least Important Heads (smallest perplexity change)")
 table.add_column("Layer", justify="right")
 table.add_column("Head", justify="right")
-table.add_column("PPL Increase", justify="right")
+table.add_column("PPL Change", justify="right")
 for layer, head, delta in flat_results[-top_k:]:
-    table.add_row(str(layer), str(head), f"+{delta:.3f}")
+    sign = "+" if delta >= 0 else ""
+    table.add_row(str(layer), str(head), f"{sign}{delta:.3f}")
 console.print(table)
 
 # %%
