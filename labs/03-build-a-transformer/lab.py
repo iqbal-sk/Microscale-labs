@@ -631,19 +631,33 @@ for layer_idx in layers_to_test:
     load_qwen3_layer_weights(block, ref_model, layer_idx=layer_idx)
     block.eval()
 
-    # Get that layer's input via hooks
+    # Capture input AND output via hooks (not hidden_states indexing,
+    # because hidden_states[-1] includes the final model.norm for the
+    # last layer, which would cause a false mismatch).
     layer_in = []
+    layer_ref_out = []
 
-    def hook_fn(module, args, kwargs, _layer_in=layer_in):
-        _layer_in.append(args[0].clone())
+    def pre_hook(module, args, kwargs, _buf=layer_in):
+        _buf.append(args[0].clone())
 
-    handle = ref_model.model.layers[layer_idx].register_forward_pre_hook(hook_fn, with_kwargs=True)
+    def post_hook(module, args, kwargs, output, _buf=layer_ref_out):
+        _buf.append(output[0].clone())
+
+    h1 = ref_model.model.layers[layer_idx].register_forward_pre_hook(
+        pre_hook,
+        with_kwargs=True,
+    )
+    h2 = ref_model.model.layers[layer_idx].register_forward_hook(
+        post_hook,
+        with_kwargs=True,
+    )
     with torch.no_grad():
-        ref_out = ref_model(**inputs, output_hidden_states=True)
-    handle.remove()
+        ref_model(**inputs)
+    h1.remove()
+    h2.remove()
 
     layer_input = layer_in[0]
-    layer_output = ref_out.hidden_states[layer_idx + 1]
+    layer_output = layer_ref_out[0]
 
     layer_cos, layer_sin = _compute_rope_frequencies(
         128,
