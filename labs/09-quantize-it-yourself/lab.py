@@ -266,7 +266,7 @@ console.print(f"  Max error: {err_nf4['max_error']:.6f}")
 # weight distributions.
 
 # %%
-indices_q4k, sub_scales, super_scales = quantize_q4k(
+indices_q4k, sub_scales, sub_mins, super_scales = quantize_q4k(
     weights.flatten(),
     super_block_size=256,
     sub_block_size=32,
@@ -274,6 +274,7 @@ indices_q4k, sub_scales, super_scales = quantize_q4k(
 deq_q4k = dequantize_q4k(
     indices_q4k,
     sub_scales,
+    sub_mins,
     original_shape=weights.shape,
 )
 err_q4k = quantization_error(weights, deq_q4k)
@@ -444,7 +445,7 @@ show(fig, filename="09-quantization-comparison.png")
 original_bytes = weights.size * 2  # fp16
 naive_bytes = weights.size // 2 + 8  # 4-bit packed + scale/zp
 nf4_bytes = weights.size // 2 + len(scales_nf4) * 4  # 4-bit + fp32 scales
-q4k_bytes = weights.size // 2 + len(sub_scales) * 4 + len(super_scales) * 4
+q4k_bytes = weights.size // 2 + len(sub_scales) * 4 + len(sub_mins) * 4 + len(super_scales) * 4
 
 table = Table(title="Compression Results")
 table.add_column("Format", style="bold")

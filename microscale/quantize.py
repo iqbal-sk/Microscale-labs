@@ -158,9 +158,10 @@ def quantize_q4k(
     - Sub-block (32 weights): 6-bit scale relative to super-block
 
     Returns:
-        (indices, sub_scales, super_scales) where:
+        (indices, sub_scales, sub_mins, super_scales) where:
         - indices: uint8 [0..15] per weight
-        - sub_scales: float32 per sub-block (the actual scale)
+        - sub_scales: float32 per sub-block scale
+        - sub_mins: float32 per sub-block minimum
         - super_scales: float32 per super-block (informational)
     """
     flat = tensor.flatten()
@@ -175,6 +176,7 @@ def quantize_q4k(
 
     all_indices = np.zeros(len(flat), dtype=np.uint8)
     sub_scales = np.zeros(n_sub, dtype=np.float32)
+    sub_mins = np.zeros(n_sub, dtype=np.float32)
     super_scales = np.zeros(n_super, dtype=np.float32)
 
     for si in range(n_super):
@@ -189,6 +191,7 @@ def quantize_q4k(
             s_max = sub_block.max()
             scale = (s_max - s_min) / 15.0
             sub_scales[sub_idx] = scale
+            sub_mins[sub_idx] = s_min
 
             if scale > 0:
                 q = np.clip(
@@ -205,12 +208,13 @@ def quantize_q4k(
         sb_end = sb_start + subs_per_super
         super_scales[si] = sub_scales[sb_start:sb_end].max()
 
-    return all_indices[:n], sub_scales, super_scales
+    return all_indices[:n], sub_scales, sub_mins, super_scales
 
 
 def dequantize_q4k(
     indices: np.ndarray,
     sub_scales: np.ndarray,
+    sub_mins: np.ndarray,
     original_shape: tuple | None = None,
     super_block_size: int = 256,
     sub_block_size: int = 32,
@@ -222,16 +226,15 @@ def dequantize_q4k(
     if pad_n > 0:
         flat = np.concatenate([flat, np.zeros(pad_n, dtype=np.uint8)])
 
-    # We need the per-sub-block min for proper dequant.
-    # Since we don't store mins separately in this simplified version,
-    # we use scale * index (asymmetric quant with implicit zero at index 0).
     result = np.zeros(len(flat), dtype=np.float32)
 
     for sub_idx in range(len(sub_scales)):
         start = sub_idx * sub_block_size
         end = start + sub_block_size
-        # Dequant: value ≈ index * scale (simplified — real Q4_K also stores min)
-        result[start:end] = flat[start:end].astype(np.float32) * sub_scales[sub_idx]
+        # Dequant: value = index * scale + min
+        result[start:end] = (
+            flat[start:end].astype(np.float32) * sub_scales[sub_idx] + sub_mins[sub_idx]
+        )
 
     result = result[:n]
     if original_shape:
