@@ -96,12 +96,18 @@ console = Console()
 # a custom base URL.
 
 # %%
+# Load .env file if it exists (supports OPENROUTER_API_KEY in .env)
+from dotenv import load_dotenv
+
+load_dotenv()  # loads from .env in current dir or parent dirs
+
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 if not OPENROUTER_API_KEY:
     console.print(
         "[bold red]No OPENROUTER_API_KEY found.[/]\n"
-        "  Set it with: export OPENROUTER_API_KEY='sk-or-...'\n"
+        "  Option 1: Create a .env file with OPENROUTER_API_KEY=sk-or-...\n"
+        "  Option 2: export OPENROUTER_API_KEY='sk-or-...'\n"
         "  Get a free key at: https://openrouter.ai/keys"
     )
 
