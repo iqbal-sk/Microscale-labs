@@ -8,6 +8,7 @@ def is_notebook() -> bool:
     """Return True if running inside a Jupyter/Colab notebook kernel."""
     try:
         from IPython import get_ipython
+
         shell = get_ipython().__class__.__name__
         return shell == "ZMQInteractiveShell"
     except (ImportError, AttributeError):
@@ -18,6 +19,7 @@ def is_colab() -> bool:
     """Return True if running inside Google Colab."""
     try:
         import google.colab  # noqa: F401
+
         return True
     except ImportError:
         return False

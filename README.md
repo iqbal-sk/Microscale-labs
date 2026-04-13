@@ -13,7 +13,7 @@ Open any lab's generated notebook in `notebooks/` directly in Colab — no local
 **Option B: Local with uv (recommended)**
 
 ```bash
-git clone https://github.com/microscale-academy/labs.git
+git clone https://github.com/iqbal-sk/Microscale-labs.git
 cd Microscale
 
 # Auto-detect your platform (Mac/GPU/CPU) and install:
@@ -28,7 +28,7 @@ just setup-cuda126  # Linux + NVIDIA GPU (CUDA 12.6, newer drivers)
 **Option C: Local with pip**
 
 ```bash
-git clone https://github.com/microscale-academy/labs.git
+git clone https://github.com/iqbal-sk/Microscale-labs.git
 cd Microscale
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[cpu,dev,notebooks]"   # Mac / CPU

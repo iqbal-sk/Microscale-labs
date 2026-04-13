@@ -43,9 +43,14 @@ except ImportError:
             "pip",
             "install",
             "-q",
-            "git+https://github.com/microscale-academy/labs.git",
+            "git+https://github.com/iqbal-sk/Microscale-labs.git",
         ]
     )
+    # Force Python to see the newly installed package (important on Colab)
+    import importlib
+
+    importlib.invalidate_caches()
+    import microscale
 
 from microscale import apply_style, device_summary, show
 from microscale.viz import heatmap

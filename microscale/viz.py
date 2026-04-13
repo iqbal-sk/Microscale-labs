@@ -3,7 +3,6 @@
 
 import os
 from pathlib import Path
-from typing import Optional
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -29,7 +28,7 @@ def _output_dir() -> Path:
     return d
 
 
-def show(fig: plt.Figure, filename: Optional[str] = None) -> None:
+def show(fig: plt.Figure, filename: str | None = None) -> None:
     """Display a figure inline (notebook) or save to disk (script).
 
     In notebook mode: calls plt.show().
@@ -44,6 +43,7 @@ def show(fig: plt.Figure, filename: Optional[str] = None) -> None:
         save_fig(fig, str(path))
         try:
             from rich.console import Console
+
             Console().print(f"  [dim]Saved:[/dim] {path}")
         except ImportError:
             print(f"  Saved: {path}")
@@ -61,8 +61,8 @@ def heatmap(
     title: str = "",
     xlabel: str = "",
     ylabel: str = "",
-    xticklabels: Optional[list] = None,
-    yticklabels: Optional[list] = None,
+    xticklabels: list | None = None,
+    yticklabels: list | None = None,
     cmap: str = "YlOrBr",
     figsize: tuple = (8, 6),
 ) -> plt.Figure:

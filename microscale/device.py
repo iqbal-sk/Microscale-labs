@@ -28,6 +28,7 @@ def get_device(prefer_mlx: bool = False) -> DeviceInfo:
     if prefer_mlx and sys.platform == "darwin":
         try:
             import mlx.core as mx
+
             return DeviceInfo(
                 runtime=Runtime.MLX,
                 name="mlx",
@@ -61,9 +62,10 @@ def get_device(prefer_mlx: bool = False) -> DeviceInfo:
     )
 
 
-def get_torch_device() -> "torch.device":
+def get_torch_device():
     """Convenience: return a torch.device for the best available backend."""
     import torch
+
     info = get_device(prefer_mlx=False)
     return torch.device(info.name)
 

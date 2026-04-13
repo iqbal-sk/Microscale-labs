@@ -1239,7 +1239,7 @@ try:
 except ImportError:
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "-q",
-         "git+https://github.com/microscale-academy/labs.git"]
+         "git+https://github.com/iqbal-sk/Microscale-labs.git"]
     )
     import microscale
 
@@ -1602,7 +1602,7 @@ Click the Colab badge on any lab below.
 **Option B: Local with uv (recommended)**
 
 ```bash
-git clone https://github.com/microscale-academy/labs.git
+git clone https://github.com/iqbal-sk/Microscale-labs.git
 cd Microscale
 uv sync --extra dev --extra notebooks
 uv run jupyter lab
@@ -1611,7 +1611,7 @@ uv run jupyter lab
 **Option C: Local with pip**
 
 ```bash
-git clone https://github.com/microscale-academy/labs.git
+git clone https://github.com/iqbal-sk/Microscale-labs.git
 cd Microscale
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,notebooks]"

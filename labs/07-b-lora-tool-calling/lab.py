@@ -69,9 +69,13 @@ except ImportError:
             "pip",
             "install",
             "-q",
-            "git+https://github.com/microscale-academy/labs.git",
+            "git+https://github.com/iqbal-sk/Microscale-labs.git",
         ]
     )
+    # Force Python to see the newly installed package (important on Colab)
+    import importlib
+
+    importlib.invalidate_caches()
     import microscale
 
 from microscale import apply_style, device_summary, get_torch_device, is_ci, show
@@ -127,11 +131,11 @@ console.print(f"  Base model: {n_base:,} parameters (frozen)")
 # system prompt via Qwen3's chat template.
 
 # %%
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-data_mod = importlib.import_module("data")
-TOOL_CALLS = data_mod.TOOL_CALLS
-TEST_PROMPTS = data_mod.TEST_PROMPTS
-KITCHEN_TOOLS = data_mod.KITCHEN_TOOLS
+from microscale.datasets.cooking_tools import (
+    KITCHEN_TOOLS,
+    TEST_PROMPTS,
+    TOOL_CALLS,
+)
 
 console.print(f"  Training examples: {len(TOOL_CALLS)}")
 console.print(f"  Held-out test prompts: {len(TEST_PROMPTS)}")

@@ -67,9 +67,13 @@ except ImportError:
             "pip",
             "install",
             "-q",
-            "git+https://github.com/microscale-academy/labs.git",
+            "git+https://github.com/iqbal-sk/Microscale-labs.git",
         ]
     )
+    # Force Python to see the newly installed package (important on Colab)
+    import importlib
+
+    importlib.invalidate_caches()
     import microscale
 
 from microscale import apply_style, device_summary, get_torch_device, is_ci, show
@@ -273,13 +277,8 @@ console.print(f"  Compression: {n_base / trainable:.0f}x fewer trainable params"
 # is formatted using Qwen3's chat template.
 
 # %%
-# Training data lives in data.py — 20 cooking instruction examples.
-import importlib
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-data_mod = importlib.import_module("data")
-INSTRUCTIONS = data_mod.INSTRUCTIONS
+# 20 cooking instruction examples shipped with the microscale package.
+from microscale.datasets.cooking_instructions import INSTRUCTIONS
 
 console.print(f"  Dataset: {len(INSTRUCTIONS)} instruction examples")
 

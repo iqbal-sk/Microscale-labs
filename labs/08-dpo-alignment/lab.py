@@ -70,9 +70,13 @@ except ImportError:
             "pip",
             "install",
             "-q",
-            "git+https://github.com/microscale-academy/labs.git",
+            "git+https://github.com/iqbal-sk/Microscale-labs.git",
         ]
     )
+    # Force Python to see the newly installed package (important on Colab)
+    import importlib
+
+    importlib.invalidate_caches()
     import microscale
 
 from microscale import (
@@ -180,9 +184,7 @@ for prompt in TEST_PROMPTS:
 # relative to its starting behavior.
 
 # %%
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-data_mod = importlib.import_module("data")
-PREFERENCE_DATA = data_mod.PREFERENCE_DATA
+from microscale.datasets.cooking_preferences import PREFERENCE_DATA
 
 console.print(f"  Loaded {len(PREFERENCE_DATA)} preference pairs")
 
