@@ -15,8 +15,22 @@ _STYLE_PATH = Path(__file__).parent / "style.mplstyle"
 
 def apply_style() -> None:
     """Apply the Microscale matplotlib theme."""
-    if not is_notebook():
+    if is_notebook():
+        # Notebook: ensure inline backend so plots show in the output cell.
+        # On Colab, matplotlib sometimes defaults to 'agg' without the
+        # %matplotlib inline magic. Set it explicitly here.
+        try:
+            from IPython import get_ipython
+
+            ipython = get_ipython()
+            if ipython is not None:
+                ipython.run_line_magic("matplotlib", "inline")
+        except (ImportError, AttributeError):
+            pass
+    else:
+        # Script: use Agg (non-interactive) to avoid needing a display.
         matplotlib.use("Agg")
+
     if _STYLE_PATH.exists():
         plt.style.use(str(_STYLE_PATH))
 

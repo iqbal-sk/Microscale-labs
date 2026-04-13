@@ -5,12 +5,26 @@ import os
 
 
 def is_notebook() -> bool:
-    """Return True if running inside a Jupyter/Colab notebook kernel."""
+    """Return True if running inside any Jupyter/Colab notebook kernel.
+
+    Detects:
+        - Jupyter (ZMQInteractiveShell)
+        - Google Colab (Shell class, or google.colab importable)
+        - VS Code notebooks (ZMQInteractiveShell)
+    """
+    # Fast path: Colab has its own detection
+    if is_colab():
+        return True
+
     try:
         from IPython import get_ipython
 
-        shell = get_ipython().__class__.__name__
-        return shell == "ZMQInteractiveShell"
+        ipython = get_ipython()
+        if ipython is None:
+            return False
+        # Any IPython instance that has a 'kernel' attribute is a notebook
+        # (as opposed to a plain IPython terminal shell)
+        return hasattr(ipython, "kernel")
     except (ImportError, AttributeError):
         return False
 
