@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync --extra dev --extra notebooks
+      - run: uv sync --extra cpu --extra dev --extra notebooks
       - run: uv run pytest tests/ -v
         env:
           MICROSCALE_CI: "1"
@@ -22,11 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        lab: ['01', '04', '05']  # Labs that run without large model downloads
+        # Labs that run quickly on CPU without large model downloads.
+        # Lab 05 (pretraining) excluded — needs GPU and takes too long.
+        lab: ['01', '04']
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync --extra dev --extra notebooks
+      - run: uv sync --extra cpu --extra dev --extra notebooks
       - name: Run lab ${{ matrix.lab }}
         run: uv run python labs/${{ matrix.lab }}-*/lab.py
         env:

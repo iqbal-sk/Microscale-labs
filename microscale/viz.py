@@ -14,22 +14,20 @@ _STYLE_PATH = Path(__file__).parent / "style.mplstyle"
 
 
 def apply_style() -> None:
-    """Apply the Microscale matplotlib theme."""
-    if is_notebook():
-        # Notebook: ensure inline backend so plots show in the output cell.
-        # On Colab, matplotlib sometimes defaults to 'agg' without the
-        # %matplotlib inline magic. Set it explicitly here.
-        try:
-            from IPython import get_ipython
+    """Apply the Microscale matplotlib theme.
 
-            ipython = get_ipython()
-            if ipython is not None:
-                ipython.run_line_magic("matplotlib", "inline")
-        except (ImportError, AttributeError):
+    Note: does NOT change the matplotlib backend. We use IPython's
+    display() directly in show() to avoid backend-related rendering
+    issues on Colab and other environments.
+    """
+    # Only set Agg backend in script mode AND if pyplot hasn't been
+    # imported yet (which it has been by line 8 of this file). This is
+    # mostly a no-op now, kept for backwards compatibility.
+    if not is_notebook():
+        try:
+            matplotlib.use("Agg", force=True)
+        except Exception:
             pass
-    else:
-        # Script: use Agg (non-interactive) to avoid needing a display.
-        matplotlib.use("Agg")
 
     if _STYLE_PATH.exists():
         plt.style.use(str(_STYLE_PATH))
@@ -45,23 +43,37 @@ def _output_dir() -> Path:
 def show(fig: plt.Figure, filename: str | None = None) -> None:
     """Display a figure inline (notebook) or save to disk (script).
 
-    In notebook mode: calls plt.show().
+    In notebook mode: uses IPython's display() directly — works in
+    Jupyter, Colab, and VS Code regardless of matplotlib backend.
     In script mode: saves to outputs/<filename> and prints a Rich message.
     """
     if is_notebook():
-        plt.show()
-    else:
-        if filename is None:
-            filename = "figure.png"
-        path = _output_dir() / filename
-        save_fig(fig, str(path))
+        # Use IPython display() directly. This bypasses the matplotlib
+        # backend entirely and works on Colab where backend detection
+        # via plt.show() can be flaky.
         try:
-            from rich.console import Console
+            from IPython.display import display
 
-            Console().print(f"  [dim]Saved:[/dim] {path}")
+            display(fig)
+            plt.close(fig)  # prevent Jupyter from also showing it
+            return
         except ImportError:
-            print(f"  Saved: {path}")
-        plt.close(fig)
+            # Fall back to plt.show() if IPython unavailable
+            plt.show()
+            return
+
+    # Script mode: save to disk
+    if filename is None:
+        filename = "figure.png"
+    path = _output_dir() / filename
+    save_fig(fig, str(path))
+    try:
+        from rich.console import Console
+
+        Console().print(f"  [dim]Saved:[/dim] {path}")
+    except ImportError:
+        print(f"  Saved: {path}")
+    plt.close(fig)
 
 
 def save_fig(fig: plt.Figure, path: str, dpi: int = 150) -> None:
