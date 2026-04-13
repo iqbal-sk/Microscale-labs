@@ -15,7 +15,7 @@ from microscale.attention import (
 )
 from microscale.cache import cache_status, setup_cache
 from microscale.device import DeviceInfo, Runtime, device_summary, get_device, get_torch_device
-from microscale.env import is_ci, is_colab, is_notebook, runtime_context
+from microscale.env import get_secret, is_ci, is_colab, is_notebook, runtime_context
 from microscale.metrics import compute_per_token_loss, compute_perplexity
 from microscale.models import get_model_info, list_models, load_model, load_tokenizer
 from microscale.viz import apply_style, heatmap, line_plot, save_fig, show
@@ -31,6 +31,7 @@ __all__ = [
     "is_notebook",
     "is_colab",
     "is_ci",
+    "get_secret",
     "runtime_context",
     # viz
     "apply_style",

@@ -107,23 +107,24 @@ console = Console()
 # a custom base URL.
 
 # %%
-# Load .env file if it exists (supports OPENROUTER_API_KEY in .env)
-from dotenv import load_dotenv
+# get_secret() works on Colab, local .env, environment variables, or prompts.
+# On Colab: add OPENROUTER_API_KEY via the 🔑 icon in the left sidebar.
+# Locally: create a .env file with OPENROUTER_API_KEY=sk-or-...
+from microscale.env import get_secret
 
-load_dotenv()  # loads from .env in current dir or parent dirs
-
-# Check common env var names for OpenRouter
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get(
-    "OPENROUTER_API_SECRET", ""
+OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY", prompt_if_missing=False) or get_secret(
+    "OPENROUTER_API_SECRET", prompt_if_missing=False
 )
 
 if not OPENROUTER_API_KEY:
     console.print(
         "[bold red]No OpenRouter API key found.[/]\n"
-        "  Create a .env file in the project root with:\n"
-        "    OPENROUTER_API_KEY=sk-or-your-key-here\n"
+        "  Colab: add OPENROUTER_API_KEY via the Secrets panel (🔑 icon)\n"
+        "  Local: create a .env file with OPENROUTER_API_KEY=sk-or-...\n"
         "  Get a free key at: https://openrouter.ai/keys"
     )
+    # On Colab/notebook, prompt interactively as a last resort
+    OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY", prompt_if_missing=True)
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
